@@ -3,7 +3,7 @@
 <div class="card">
   <h2>{{ test.title }}</h2>
   <p>Статус: {{ test.status }}</p>
-  <form method="post" action="/teacher/tests/{{ test.id }}/edit">
+  <form method="post" action="/teacher/tests/{{ test.id }}/edit" id="test-edit-form">
     {% for q in questions %}
       <div class="question">
         <label>Вопрос {{ loop.index }}</label>
@@ -18,12 +18,15 @@
         </div>
       </div>
     {% endfor %}
-    <button class="button" type="submit">Сохранить изменения</button>
   </form>
-  {% if test.status != "published" %}
-    <form method="post" action="/teacher/tests/{{ test.id }}/publish">
-      <button class="button secondary" type="submit">Опубликовать</button>
-    </form>
-  {% endif %}
+  <div class="actions-inline">
+    <button class="button" type="submit" form="test-edit-form">Сохранить изменения</button>
+    {% if test.status != "published" %}
+      <form method="post" action="/teacher/tests/{{ test.id }}/publish" style="margin:0;">
+        <button class="button secondary" type="submit">Опубликовать</button>
+      </form>
+    {% endif %}
+    <a class="button secondary" href="/teacher/lectures">К меню лекций</a>
+  </div>
 </div>
 {% endblock %}
