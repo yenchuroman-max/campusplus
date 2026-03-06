@@ -715,6 +715,10 @@ body.nav-open .nav-toggle-line:nth-child(3) { transform: translateY(-6px) rotate
   margin: 0 auto;
 }
 
+.register-card {
+  overflow: visible;
+}
+
 .card .card-title {
   font-size: 16px;
   font-weight: 700;
@@ -1596,6 +1600,9 @@ input[type="file"]::file-selector-button {
   box-shadow: var(--shadow-lg);
   max-height: 240px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 .custom-select.open .custom-select-menu { display: block; }
 
@@ -2558,6 +2565,10 @@ html[data-theme="light"] ::selection {
   .assign-group-form,
   .create-teacher-form { grid-template-columns: 1fr; }
   .inline-group-form .button { grid-column: 1 / -1; }
+
+  .register-card .custom-select-menu {
+    max-height: min(44vh, 280px);
+  }
 }
 
 @media (max-width: 480px) {
