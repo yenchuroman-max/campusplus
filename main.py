@@ -232,8 +232,18 @@ def fetch_users_by_role(cur, role: str, query: str = "") -> list[dict[str, Any]]
     q = (query or "").strip()
     if q:
         cur.execute(
-            "SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE role = ? AND full_name LIKE ? ORDER BY full_name",
-            (role, f"%{q}%"),
+            """
+            SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
+            FROM users
+            WHERE role = ?
+              AND (
+                full_name LIKE ?
+                OR email LIKE ?
+                OR COALESCE(student_group, '') LIKE ?
+              )
+            ORDER BY full_name
+            """,
+            (role, f"%{q}%", f"%{q}%", f"%{q}%"),
         )
     else:
         cur.execute(
@@ -863,6 +873,7 @@ def register(
         conn.close()
         return _render_register_form(request, "Логин уже используется.", form_state)
     conn.close()
+    add_flash(request, "Регистрация успешна. Войдите под своим логином и паролем.", "success")
     return RedirectResponse("/login", status_code=302)
 
 
@@ -1377,6 +1388,205 @@ def lecture_detail(request: Request, lecture_id: int):
     return render(request, "lecture_detail.html", {"lecture": dict(lecture), "tests": tests})
 
 
+def _load_accessible_lectures(cur, user: dict[str, Any]) -> list[dict[str, Any]]:
+    if user["role"] == "teacher":
+        cur.execute("SELECT id, title, created_at FROM lectures WHERE teacher_id = ? ORDER BY id DESC", (user["id"],))
+    else:
+        cur.execute("SELECT id, title, created_at FROM lectures ORDER BY id DESC")
+    return [dict(r) for r in cur.fetchall()]
+
+
+@app.get("/teacher/tests/manual/new", response_class=HTMLResponse)
+def manual_test_new_form(request: Request, lecture_id: int | None = None):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    lectures = _load_accessible_lectures(cur, user)
+    conn.close()
+
+    if not lectures:
+        add_flash(request, "Сначала создайте лекцию, затем можно собрать тест вручную.", "info")
+        return RedirectResponse("/teacher/lectures/new", status_code=302)
+
+    lecture_ids = {int(item["id"]) for item in lectures}
+    selected_lecture_id = int(lecture_id) if lecture_id and int(lecture_id) in lecture_ids else int(lectures[0]["id"])
+    lecture_by_id = {int(item["id"]): item for item in lectures}
+    selected_lecture = lecture_by_id.get(selected_lecture_id, lectures[0])
+
+    return render(
+        request,
+        "test_manual_new.html",
+        {
+            "error": None,
+            "lectures": lectures,
+            "selected_lecture_id": selected_lecture_id,
+            "title_value": f"Ручной тест: {selected_lecture['title']}",
+            "questions": [{"text": "", "options": ["", "", "", ""], "correct_index": 0}],
+        },
+    )
+
+
+@app.post("/teacher/tests/manual/new")
+async def manual_test_new_submit(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    lecture_id_raw = (form.get("lecture_id") or "").strip()
+
+    question_texts = [str(v) for v in form.getlist("question_text")]
+    option_a = [str(v) for v in form.getlist("option_a")]
+    option_b = [str(v) for v in form.getlist("option_b")]
+    option_c = [str(v) for v in form.getlist("option_c")]
+    option_d = [str(v) for v in form.getlist("option_d")]
+    correct_indexes = [str(v) for v in form.getlist("correct_index")]
+
+    conn = connect()
+    cur = conn.cursor()
+    lectures = _load_accessible_lectures(cur, user)
+    lecture_by_id = {int(item["id"]): item for item in lectures}
+
+    try:
+        lecture_id = int(lecture_id_raw)
+    except Exception:
+        lecture_id = 0
+
+    max_len = max(
+        len(question_texts),
+        len(option_a),
+        len(option_b),
+        len(option_c),
+        len(option_d),
+        len(correct_indexes),
+        1,
+    )
+    raw_questions: list[dict[str, Any]] = []
+    for i in range(max_len):
+        raw_questions.append(
+            {
+                "text": (question_texts[i] if i < len(question_texts) else "").strip(),
+                "options": [
+                    (option_a[i] if i < len(option_a) else "").strip(),
+                    (option_b[i] if i < len(option_b) else "").strip(),
+                    (option_c[i] if i < len(option_c) else "").strip(),
+                    (option_d[i] if i < len(option_d) else "").strip(),
+                ],
+                "correct_index": int(correct_indexes[i]) if i < len(correct_indexes) and str(correct_indexes[i]).isdigit() else 0,
+            }
+        )
+
+    if lecture_id not in lecture_by_id:
+        conn.close()
+        return render(
+            request,
+            "test_manual_new.html",
+            {
+                "error": "Выберите лекцию из списка.",
+                "lectures": lectures,
+                "selected_lecture_id": int(lectures[0]["id"]) if lectures else None,
+                "title_value": title,
+                "questions": raw_questions,
+            },
+        )
+
+    clean_questions: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw_questions, start=1):
+        text = item["text"]
+        options = item["options"]
+        has_any_data = bool(text or any(options))
+        if not has_any_data:
+            continue
+
+        if not text:
+            conn.close()
+            return render(
+                request,
+                "test_manual_new.html",
+                {
+                    "error": f"Вопрос №{idx}: заполните текст вопроса.",
+                    "lectures": lectures,
+                    "selected_lecture_id": lecture_id,
+                    "title_value": title,
+                    "questions": raw_questions,
+                },
+            )
+
+        if any(not opt for opt in options):
+            conn.close()
+            return render(
+                request,
+                "test_manual_new.html",
+                {
+                    "error": f"Вопрос №{idx}: заполните все 4 варианта ответа.",
+                    "lectures": lectures,
+                    "selected_lecture_id": lecture_id,
+                    "title_value": title,
+                    "questions": raw_questions,
+                },
+            )
+
+        correct_index = int(item["correct_index"])
+        if correct_index < 0 or correct_index > 3:
+            conn.close()
+            return render(
+                request,
+                "test_manual_new.html",
+                {
+                    "error": f"Вопрос №{idx}: укажите корректный правильный ответ.",
+                    "lectures": lectures,
+                    "selected_lecture_id": lecture_id,
+                    "title_value": title,
+                    "questions": raw_questions,
+                },
+            )
+
+        clean_questions.append(
+            {
+                "text": text,
+                "options_json": json.dumps(options, ensure_ascii=False),
+                "correct_index": correct_index,
+            }
+        )
+
+    if not clean_questions:
+        conn.close()
+        return render(
+            request,
+            "test_manual_new.html",
+            {
+                "error": "Добавьте хотя бы один полностью заполненный вопрос.",
+                "lectures": lectures,
+                "selected_lecture_id": lecture_id,
+                "title_value": title,
+                "questions": raw_questions,
+            },
+        )
+
+    final_title = title if title else f"Ручной тест: {lecture_by_id[lecture_id]['title']}"
+    cur.execute(
+        "INSERT INTO tests (lecture_id, title, status, created_at) VALUES (?, ?, 'draft', ?)",
+        (lecture_id, final_title, datetime.utcnow().isoformat()),
+    )
+    test_id = cur.lastrowid
+    for item in clean_questions:
+        cur.execute(
+            "INSERT INTO questions (test_id, text, options_json, correct_index) VALUES (?, ?, ?, ?)",
+            (test_id, item["text"], item["options_json"], item["correct_index"]),
+        )
+    conn.commit()
+    conn.close()
+
+    add_flash(request, "Ручной тест создан в статусе draft. Проверьте и опубликуйте.", "success")
+    return RedirectResponse(f"/teacher/tests/{test_id}/edit", status_code=302)
+
+
 @app.post("/teacher/lectures/{lecture_id}/generate")
 def generate_test(
     request: Request,
@@ -1887,6 +2097,7 @@ async def take_test_submit(request: Request, test_id: int):
         )
     conn.commit()
     conn.close()
+    add_flash(request, f"Тест отправлен. Результат: {score}%.", "success")
     return RedirectResponse(f"/student/attempts/{attempt_id}", status_code=302)
 
 

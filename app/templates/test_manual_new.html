@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <h2>Конструктор теста (ручной)</h2>
+  <a class="button secondary" href="/v2/teacher/tests">К списку тестов</a>
+</div>
+
+{% if error %}
+  <div class="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/teacher/tests/manual/new" class="card">
+  <label>Лекция</label>
+  <select name="lecture_id" required>
+    {% for l in lectures %}
+      <option value="{{ l.id }}" {% if selected_lecture_id == l.id %}selected{% endif %}>{{ l.title }}</option>
+    {% endfor %}
+  </select>
+
+  <label style="margin-top:10px;">Название теста</label>
+  <input type="text" name="title" value="{{ title_value or '' }}" placeholder="Например: Контрольная 1" />
+
+  <div id="manual-questions" style="margin-top:14px;">
+    {% for q in questions %}
+      <div class="card manual-question-card" data-question-card style="margin-bottom:10px;">
+        <div class="actions-inline" style="justify-content:space-between; align-items:center;">
+          <strong class="manual-question-title">Вопрос {{ loop.index }}</strong>
+          <button type="button" class="button danger" data-remove-question>Удалить</button>
+        </div>
+
+        <label style="margin-top:8px;">Текст вопроса</label>
+        <textarea name="question_text" rows="3" placeholder="Введите вопрос">{{ q.text }}</textarea>
+
+        <label style="margin-top:8px;">Вариант 1</label>
+        <input type="text" name="option_a" value="{{ q.options[0] if q.options and q.options|length > 0 else '' }}" />
+
+        <label>Вариант 2</label>
+        <input type="text" name="option_b" value="{{ q.options[1] if q.options and q.options|length > 1 else '' }}" />
+
+        <label>Вариант 3</label>
+        <input type="text" name="option_c" value="{{ q.options[2] if q.options and q.options|length > 2 else '' }}" />
+
+        <label>Вариант 4</label>
+        <input type="text" name="option_d" value="{{ q.options[3] if q.options and q.options|length > 3 else '' }}" />
+
+        <label>Правильный ответ</label>
+        <select name="correct_index">
+          <option value="0" {% if q.correct_index == 0 %}selected{% endif %}>Вариант 1</option>
+          <option value="1" {% if q.correct_index == 1 %}selected{% endif %}>Вариант 2</option>
+          <option value="2" {% if q.correct_index == 2 %}selected{% endif %}>Вариант 3</option>
+          <option value="3" {% if q.correct_index == 3 %}selected{% endif %}>Вариант 4</option>
+        </select>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="actions-inline" style="margin-top:10px;">
+    <button type="button" class="button secondary" id="add-manual-question">+ Добавить вопрос</button>
+    <button type="submit" class="button">Создать тест (draft)</button>
+  </div>
+</form>
+
+<template id="manual-question-template">
+  <div class="card manual-question-card" data-question-card style="margin-bottom:10px;">
+    <div class="actions-inline" style="justify-content:space-between; align-items:center;">
+      <strong class="manual-question-title">Вопрос</strong>
+      <button type="button" class="button danger" data-remove-question>Удалить</button>
+    </div>
+
+    <label style="margin-top:8px;">Текст вопроса</label>
+    <textarea name="question_text" rows="3" placeholder="Введите вопрос"></textarea>
+
+    <label style="margin-top:8px;">Вариант 1</label>
+    <input type="text" name="option_a" />
+
+    <label>Вариант 2</label>
+    <input type="text" name="option_b" />
+
+    <label>Вариант 3</label>
+    <input type="text" name="option_c" />
+
+    <label>Вариант 4</label>
+    <input type="text" name="option_d" />
+
+    <label>Правильный ответ</label>
+    <select name="correct_index">
+      <option value="0" selected>Вариант 1</option>
+      <option value="1">Вариант 2</option>
+      <option value="2">Вариант 3</option>
+      <option value="3">Вариант 4</option>
+    </select>
+  </div>
+</template>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var questionsRoot = document.getElementById('manual-questions');
+    var addBtn = document.getElementById('add-manual-question');
+    var tpl = document.getElementById('manual-question-template');
+
+    function renumber() {
+      var cards = questionsRoot.querySelectorAll('[data-question-card]');
+      cards.forEach(function (card, idx) {
+        var title = card.querySelector('.manual-question-title');
+        if (title) title.textContent = 'Вопрос ' + (idx + 1);
+      });
+      cards.forEach(function (card) {
+        var removeBtn = card.querySelector('[data-remove-question]');
+        if (removeBtn) removeBtn.disabled = cards.length <= 1;
+      });
+    }
+
+    function bindRemove(card) {
+      var removeBtn = card.querySelector('[data-remove-question]');
+      if (!removeBtn) return;
+      removeBtn.addEventListener('click', function () {
+        card.remove();
+        renumber();
+      });
+    }
+
+    questionsRoot.querySelectorAll('[data-question-card]').forEach(bindRemove);
+    renumber();
+
+    addBtn.addEventListener('click', function () {
+      if (!tpl) return;
+      var clone = tpl.content.firstElementChild.cloneNode(true);
+      questionsRoot.appendChild(clone);
+      bindRemove(clone);
+      renumber();
+    });
+  });
+</script>
+{% endblock %}
