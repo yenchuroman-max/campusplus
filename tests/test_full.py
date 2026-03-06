@@ -545,6 +545,20 @@ class TestAdminFlow:
         r = client.get("/admin/students")
         assert r.status_code == 200
 
+    def test_admin_students_grouped_by_group(self, client, db):
+        self._setup_admin(client, db)
+        _insert_user(db, role="student", login="grouped_1@test.ru", password="pass123", full_name="Student One", group="BI-41.2")
+        _insert_user(db, role="student", login="grouped_2@test.ru", password="pass123", full_name="Student Two", group="BI-41.2")
+        _insert_user(db, role="student", login="nogroup@test.ru", password="pass123", full_name="Student Zero", group="")
+
+        r = client.get("/admin/students")
+        assert r.status_code == 200
+        body = r.text
+        assert 'data-group-name="BI-41.2"' in body
+        assert body.count('data-group-name="') >= 2
+        assert "Student One" in body
+        assert "Student Zero" in body
+
     def test_admin_teachers_page(self, client, db):
         self._setup_admin(client, db)
         r = client.get("/admin/teachers")
@@ -720,6 +734,73 @@ class TestV2Teacher:
         self._setup(client, db)
         r = client.get("/v2/teacher/students")
         assert r.status_code == 200
+
+    def test_students_page_grouped_accordion(self, client, db):
+        teacher_id = self._setup(client, db)
+        _insert_user(
+            db,
+            role="student",
+            login="v2s1@t.ru",
+            password="pass123",
+            full_name="Борис Борисов",
+            group="G-10",
+            assigned_teacher_id=teacher_id,
+        )
+        _insert_user(
+            db,
+            role="student",
+            login="v2s2@t.ru",
+            password="pass123",
+            full_name="Алексей Алексеев",
+            group="G-2",
+            assigned_teacher_id=teacher_id,
+        )
+        _insert_user(
+            db,
+            role="student",
+            login="v2s3@t.ru",
+            password="pass123",
+            full_name="Виктор Викторов",
+            group="G-2",
+            assigned_teacher_id=teacher_id,
+        )
+
+        r = client.get("/v2/teacher/students")
+        assert r.status_code == 200
+        body = r.text
+        assert 'data-student-group-toggle' in body
+        assert 'data-group-name="G-2"' in body
+        assert 'data-group-name="G-10"' in body
+        assert body.find('data-group-name="G-2"') < body.find('data-group-name="G-10"')
+        assert body.find("Алексей Алексеев") < body.find("Виктор Викторов")
+
+    def test_student_performance_page(self, client, db):
+        teacher_id = self._setup(client, db)
+        cur = db.cursor()
+        cur.execute("SELECT id FROM disciplines LIMIT 1")
+        discipline_id = int(cur.fetchone()[0])
+
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="perf_stud@t.ru",
+            password="pass123",
+            full_name="Perf Student",
+            group="BI-50",
+            assigned_teacher_id=teacher_id,
+        )
+        lecture_id = _insert_lecture(db, teacher_id, title="Perf Lecture", discipline_id=discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="Perf Test")
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, student_id, 88.5, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+
+        r = client.get(f"/v2/teacher/students/{student_id}/performance")
+        assert r.status_code == 200
+        assert "Perf Test" in r.text
+        assert "Успеваемость студента" in r.text
 
     def test_analytics_page(self, client, db):
         self._setup(client, db)
@@ -960,6 +1041,31 @@ class TestAIGenerate:
         with patch.dict(os.environ, {"OPENAI_API_KEY": "", "AI_ALLOW_FALLBACK": "false"}, clear=False):
             result = generate_questions("Текст " * 100, count=5)
         assert result == []
+
+    def test_generate_questions_exact_requested_count(self):
+        from app.ai import generate_questions
+
+        source_text = (
+            "Информационная безопасность включает конфиденциальность, целостность и доступность данных. "
+            "Система защиты строится из организационных и технических мер. "
+            "Контроль доступа должен учитывать роли пользователей и принципы минимальных привилегий. "
+            "Регулярный аудит событий помогает выявлять аномалии и снижать риск инцидентов. "
+            "Резервное копирование уменьшает потери при сбоях и ошибках эксплуатации. "
+        ) * 40
+
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "", "GEMINI_API_KEY": "", "AI_ALLOW_FALLBACK": "true"},
+            clear=False,
+        ):
+            result = generate_questions(source_text, count=20, difficulty="medium")
+
+        assert isinstance(result, list)
+        assert len(result) == 20
+        for item in result:
+            assert isinstance(item.get("text"), str) and item["text"].strip()
+            assert isinstance(item.get("options"), list) and len(item["options"]) >= 3
+            assert 0 <= int(item.get("correct_index", -1)) < len(item["options"])
 
     def test_diagnose_ai_setup(self):
         from app.ai import diagnose_ai_setup

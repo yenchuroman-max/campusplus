@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 import json
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -66,6 +67,16 @@ def format_last_login(ts: str | None) -> str:
         return dt.strftime("%d.%m.%Y")
     except Exception:
         return ts
+
+
+def format_datetime_label(ts: str | None) -> str:
+    if not ts:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(str(ts))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return str(ts)
 
 
 def user_row_to_dict(row) -> dict:
@@ -251,6 +262,43 @@ def fetch_users_by_role(cur, role: str, query: str = "") -> list[dict[str, Any]]
             (role,),
         )
     return [user_row_to_dict(r) for r in cur.fetchall()]
+
+
+def group_students_by_group(students: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _natural_sort_key(value: str) -> tuple:
+        parts = re.split(r"(\d+)", (value or "").lower())
+        key: list[Any] = []
+        for part in parts:
+            if not part:
+                continue
+            if part.isdigit():
+                key.append((0, int(part)))
+            else:
+                key.append((1, part))
+        return tuple(key)
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for student in students:
+        group_name = (student.get("student_group") or "").strip() or "Без группы"
+        grouped.setdefault(group_name, []).append(student)
+
+    for name in grouped.keys():
+        grouped[name] = sorted(
+            grouped[name],
+            key=lambda student: ((student.get("full_name") or "").strip().lower(), int(student.get("id") or 0)),
+        )
+
+    ordered_names = sorted(
+        [name for name in grouped.keys() if name != "Без группы"],
+        key=_natural_sort_key,
+    )
+    if "Без группы" in grouped:
+        ordered_names.append("Без группы")
+
+    return [
+        {"name": name, "count": len(grouped[name]), "students": grouped[name]}
+        for name in ordered_names
+    ]
 
 
 def _role_label(role: str) -> str:
@@ -2427,8 +2475,20 @@ def admin_students(request: Request):
     conn = connect()
     cur = conn.cursor()
     users = fetch_users_by_role(cur, "student", q)
+    grouped_students = group_students_by_group(users)
     conn.close()
-    return render(request, "admin_users.html", {"users": users, "mode": "admin", "query": q, "page_kind": "students", "page_title": "Студенты"})
+    return render(
+        request,
+        "admin_users.html",
+        {
+            "users": users,
+            "grouped_students": grouped_students,
+            "mode": "admin",
+            "query": q,
+            "page_kind": "students",
+            "page_title": "Студенты",
+        },
+    )
 
 
 @app.get("/admin/teachers", response_class=HTMLResponse)
@@ -2943,8 +3003,20 @@ def v1_admin_students(request: Request):
     conn = connect()
     cur = conn.cursor()
     users = fetch_users_by_role(cur, "student", q)
+    grouped_students = group_students_by_group(users)
     conn.close()
-    return templates.TemplateResponse("admin_users.html", {"request": request, "users": users, "mode": "v1_admin", "query": q, "page_kind": "students", "page_title": "Студенты"})
+    return templates.TemplateResponse(
+        "admin_users.html",
+        {
+            "request": request,
+            "users": users,
+            "grouped_students": grouped_students,
+            "mode": "v1_admin",
+            "query": q,
+            "page_kind": "students",
+            "page_title": "Студенты",
+        },
+    )
 
 
 @app.get("/v1/admin/teachers", response_class=HTMLResponse)
@@ -3680,8 +3752,20 @@ def v1_teacher_users(request: Request):
     cur = conn.cursor()
     cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE assigned_teacher_id = ? ORDER BY full_name", (user["id"],))
     students = [user_row_to_dict(r) for r in cur.fetchall()]
+    grouped_students = group_students_by_group(students)
     conn.close()
-    return templates.TemplateResponse("admin_users.html", {"request": request, "users": students, "mode": "v1_teacher", "query": "", "page_kind": "students", "page_title": "Студенты"})
+    return templates.TemplateResponse(
+        "admin_users.html",
+        {
+            "request": request,
+            "users": students,
+            "grouped_students": grouped_students,
+            "mode": "v1_teacher",
+            "query": "",
+            "page_kind": "students",
+            "page_title": "Студенты",
+        },
+    )
 
 
 @app.get("/v1/teacher/groups/{group_name}", response_class=HTMLResponse)
@@ -3714,12 +3798,14 @@ def v1_teacher_group(request: Request, group_name: str):
             (user["id"], name),
         )
     rows = [user_row_to_dict(r) for r in cur.fetchall()]
+    grouped_students = group_students_by_group(rows)
     conn.close()
     return templates.TemplateResponse(
         "admin_users.html",
         {
             "request": request,
             "users": rows,
+            "grouped_students": grouped_students,
             "mode": "v1_teacher",
             "query": "",
             "page_kind": "students",
@@ -3801,6 +3887,15 @@ def v1_teacher_set_group(request: Request, user_id: int, student_group: str = Fo
 
 @app.get("/v2/teacher", response_class=HTMLResponse)
 def v2_teacher_index(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.get("/teacher/disciplines", response_class=HTMLResponse)
+def teacher_disciplines_alias(request: Request):
     ensure_start_session_cookie(request)
     user = get_current_user(request)
     if not user or user["role"] != "teacher":
@@ -4096,6 +4191,7 @@ def v2_teacher_students(request: Request):
         (user["id"],),
     )
     students = [user_row_to_dict(r) for r in cur.fetchall()]
+    grouped_students = group_students_by_group(students)
     conn.close()
     return render(
         request,
@@ -4103,9 +4199,257 @@ def v2_teacher_students(request: Request):
         {
             "active_tab": "students",
             "students": students,
+            "grouped_students": grouped_students,
             "available_groups": available_groups,
         },
     )
+
+
+def build_teacher_student_performance_context(
+    cur,
+    teacher_id: int,
+    student_id: int,
+    discipline_filter: int | None = None,
+) -> dict[str, Any] | None:
+    cur.execute(
+        """
+        SELECT id, full_name, email, last_login, student_group, assigned_teacher_id
+        FROM users
+        WHERE id = ? AND role = 'student'
+        """,
+        (student_id,),
+    )
+    student_row = cur.fetchone()
+    if not student_row:
+        return None
+    student_data = dict(student_row)
+    if int(student_data.get("assigned_teacher_id") or 0) != teacher_id:
+        return None
+
+    student = user_row_to_dict(student_data)
+
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (teacher_id,),
+    )
+    disciplines = [dict(row) for row in cur.fetchall()]
+    allowed_discipline_ids = {int(row["id"]) for row in disciplines}
+
+    selected_discipline_id: int | None = None
+    if discipline_filter and discipline_filter in allowed_discipline_ids:
+        selected_discipline_id = discipline_filter
+
+    tests_params: tuple[Any, ...] = (student_id, teacher_id)
+    tests_filter_sql = ""
+    if selected_discipline_id:
+        tests_filter_sql = " AND lectures.discipline_id = ?"
+        tests_params = (student_id, teacher_id, selected_discipline_id)
+
+    cur.execute(
+        f"""
+        SELECT
+            tests.id AS test_id,
+            tests.title AS test_title,
+            lectures.title AS lecture_title,
+            COALESCE(lectures.discipline_id, 0) AS discipline_id,
+            COALESCE(d.name, 'Без дисциплины') AS discipline_name,
+            a.id AS attempt_id,
+            a.score AS score,
+            a.taken_at AS taken_at
+        FROM tests
+        JOIN lectures ON lectures.id = tests.lecture_id
+        LEFT JOIN disciplines d ON d.id = lectures.discipline_id
+        LEFT JOIN attempts a ON a.id = (
+            SELECT MAX(ax.id)
+            FROM attempts ax
+            WHERE ax.test_id = tests.id AND ax.student_id = ?
+        )
+        WHERE lectures.teacher_id = ? AND tests.status = 'published'{tests_filter_sql}
+        ORDER BY COALESCE(d.name, 'Без дисциплины'), lectures.title, tests.id DESC
+        """,
+        tests_params,
+    )
+    tests_rows = [dict(row) for row in cur.fetchall()]
+
+    attempts_params: tuple[Any, ...] = (student_id, teacher_id)
+    attempts_filter_sql = ""
+    if selected_discipline_id:
+        attempts_filter_sql = " AND lectures.discipline_id = ?"
+        attempts_params = (student_id, teacher_id, selected_discipline_id)
+
+    cur.execute(
+        f"""
+        SELECT
+            attempts.id AS attempt_id,
+            attempts.score AS score,
+            attempts.taken_at AS taken_at,
+            tests.id AS test_id,
+            tests.title AS test_title,
+            lectures.title AS lecture_title,
+            COALESCE(d.name, 'Без дисциплины') AS discipline_name
+        FROM attempts
+        JOIN tests ON tests.id = attempts.test_id
+        JOIN lectures ON lectures.id = tests.lecture_id
+        LEFT JOIN disciplines d ON d.id = lectures.discipline_id
+        WHERE attempts.student_id = ? AND lectures.teacher_id = ?{attempts_filter_sql}
+        ORDER BY attempts.taken_at DESC, attempts.id DESC
+        """,
+        attempts_params,
+    )
+    attempts_rows = [dict(row) for row in cur.fetchall()]
+
+    for row in tests_rows:
+        score_raw = row.get("score")
+        score_value = None
+        if score_raw is not None:
+            try:
+                score_value = round(float(score_raw), 2)
+            except Exception:
+                score_value = None
+        row["score_value"] = score_value
+        row["is_completed"] = bool(row.get("attempt_id"))
+        row["is_passed"] = bool(score_value is not None and score_value >= 60.0)
+        row["taken_at_display"] = format_datetime_label(row.get("taken_at"))
+
+    for row in attempts_rows:
+        try:
+            score_value = round(float(row.get("score") or 0), 2)
+        except Exception:
+            score_value = 0.0
+        row["score"] = score_value
+        row["is_passed"] = bool(score_value >= 60.0)
+        row["taken_at_display"] = format_datetime_label(row.get("taken_at"))
+
+    total_tests = len(tests_rows)
+    completed_tests = [row for row in tests_rows if row["is_completed"]]
+    completed_count = len(completed_tests)
+    scores = [float(row["score_value"]) for row in completed_tests if row.get("score_value") is not None]
+
+    passed_count = len([row for row in completed_tests if row["is_passed"]])
+    failed_count = max(0, completed_count - passed_count)
+    average_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+    best_score = max(scores) if scores else 0.0
+    worst_score = min(scores) if scores else 0.0
+    completion_rate = round((completed_count / total_tests) * 100, 2) if total_tests else 0.0
+    pass_rate = round((passed_count / completed_count) * 100, 2) if completed_count else 0.0
+
+    by_discipline: dict[str, dict[str, Any]] = {}
+    for row in tests_rows:
+        discipline_name = (row.get("discipline_name") or "Без дисциплины").strip() or "Без дисциплины"
+        entry = by_discipline.setdefault(
+            discipline_name,
+            {
+                "discipline": discipline_name,
+                "tests_total": 0,
+                "completed": 0,
+                "passed": 0,
+                "scores": [],
+            },
+        )
+        entry["tests_total"] += 1
+        if row["is_completed"]:
+            entry["completed"] += 1
+            if row.get("score_value") is not None:
+                entry["scores"].append(float(row["score_value"]))
+            if row["is_passed"]:
+                entry["passed"] += 1
+
+    discipline_stats: list[dict[str, Any]] = []
+    for entry in by_discipline.values():
+        avg_score = round(sum(entry["scores"]) / len(entry["scores"]), 2) if entry["scores"] else 0.0
+        completion = round((entry["completed"] / entry["tests_total"]) * 100, 2) if entry["tests_total"] else 0.0
+        pass_rate_discipline = round((entry["passed"] / entry["completed"]) * 100, 2) if entry["completed"] else 0.0
+        discipline_stats.append(
+            {
+                "discipline": entry["discipline"],
+                "tests_total": entry["tests_total"],
+                "completed": entry["completed"],
+                "avg_score": avg_score,
+                "completion_rate": completion,
+                "pass_rate": pass_rate_discipline,
+            }
+        )
+    discipline_stats.sort(key=lambda item: item["discipline"].lower())
+
+    recent_attempt_scores = [float(row["score"]) for row in attempts_rows[:10]]
+    spark_points = list(reversed(recent_attempt_scores))
+    sparkline = make_sparkline(spark_points)
+
+    return {
+        "student": student,
+        "disciplines": disciplines,
+        "selected_discipline_id": selected_discipline_id,
+        "tests": tests_rows,
+        "recent_attempts": attempts_rows[:40],
+        "discipline_stats": discipline_stats,
+        "summary": {
+            "total_tests": total_tests,
+            "completed_count": completed_count,
+            "passed_count": passed_count,
+            "failed_count": failed_count,
+            "average_score": average_score,
+            "best_score": best_score,
+            "worst_score": worst_score,
+            "completion_rate": completion_rate,
+            "pass_rate": pass_rate,
+        },
+        "spark_points": spark_points,
+        "sparkline": sparkline,
+    }
+
+
+@app.get("/v2/teacher/students/{user_id}/performance", response_class=HTMLResponse)
+def v2_teacher_student_performance(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    discipline_filter_raw = (request.query_params.get("discipline_id") or "").strip()
+    discipline_filter: int | None = None
+    if discipline_filter_raw:
+        try:
+            discipline_filter = int(discipline_filter_raw)
+        except Exception:
+            discipline_filter = None
+
+    conn = connect()
+    cur = conn.cursor()
+    context = build_teacher_student_performance_context(cur, int(user["id"]), int(user_id), discipline_filter)
+    conn.close()
+
+    if not context:
+        add_flash(request, "Студент не найден или недоступен для просмотра.", "error")
+        return RedirectResponse("/v2/teacher/students", status_code=302)
+
+    return render(
+        request,
+        "v2_teacher_student_performance.html",
+        {
+            "active_tab": "students",
+            **context,
+        },
+    )
+
+
+@app.get("/v1/teacher/users/{user_id}/performance")
+def v1_teacher_user_performance(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    query_suffix = ""
+    discipline_id = (request.query_params.get("discipline_id") or "").strip()
+    if discipline_id:
+        query_suffix = f"?discipline_id={discipline_id}"
+    return RedirectResponse(f"/v2/teacher/students/{user_id}/performance{query_suffix}", status_code=302)
 
 
 @app.post("/v2/teacher/students/{user_id}/set_group")

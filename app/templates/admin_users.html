@@ -35,6 +35,59 @@
 
   <div class="card" style="margin-bottom:14px;">
     <h3 style="margin:0 0 10px 0;">{{ page_title if page_title else 'Пользователи' }}</h3>
+    {% if page_kind == 'students' %}
+      {% if grouped_students %}
+      <div class="admin-student-groups">
+        {% for group in grouped_students %}
+        <section class="card group-column admin-student-group" data-group-name="{{ group.name }}">
+          <button
+            type="button"
+            class="group-toggle"
+            data-student-group-toggle
+            aria-expanded="false"
+            aria-controls="students-group-{{ loop.index }}"
+          >
+            <span class="group-arrow" aria-hidden="true">›</span>
+            <span class="admin-student-group-title">{{ group.name }}</span>
+            <span class="muted" style="margin-left:auto;">Студентов: {{ group.count }}</span>
+          </button>
+          <div class="group-members admin-student-group-members" id="students-group-{{ loop.index }}">
+            <div class="list admin-student-group-list">
+            {% for u in group.students %}
+            <div class="card admin-card user-card">
+              <div class="card-head">
+                <div class="card-icon">{{ u.full_name[0]|upper }}</div>
+                <div style="flex:1; min-width:0;">
+                  <div class="card-title">{{ u.full_name }}</div>
+                  <div class="card-desc">Логин: {{ u.email }}</div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="muted">Группа: {{ u.student_group if u.student_group else 'Без группы' }}</div>
+                <div class="muted">Последний вход: {{ u.last_login }}</div>
+              </div>
+              <div class="card-footer actions-inline">
+                <a class="button secondary" href="{{ base_prefix }}/users/{{ u.id }}/edit">Редактировать</a>
+                {% if mode == 'v1_teacher' %}
+                <a class="button secondary" href="/v1/teacher/users/{{ u.id }}/performance">Успеваемость</a>
+                {% endif %}
+                {% if mode in ['admin', 'v1_admin'] %}
+                <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя? Это действие необратимо.');" style="margin:0;">
+                  <button class="button danger" type="submit">Удалить</button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+            </div>
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">Студентов не найдено.</p>
+      {% endif %}
+    {% else %}
     <div class="list">
       {% for u in users %}
       <div class="card admin-card user-card">
@@ -46,26 +99,18 @@
           </div>
         </div>
         <div class="card-body">
-          {% if page_kind == 'students' %}
-          <div class="muted">Группа: {{ u.student_group if u.student_group else 'Без группы' }}</div>
-          {% else %}
           <div class="muted">Роль: преподаватель</div>
-          {% endif %}
           <div class="muted">Последний вход: {{ u.last_login }}</div>
         </div>
         <div class="card-footer actions-inline">
           <a class="button secondary" href="{{ base_prefix }}/users/{{ u.id }}/edit">Редактировать</a>
-          {% if mode in ['admin', 'v1_admin'] and page_kind == 'students' %}
-          <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя? Это действие необратимо.');" style="margin:0;">
-            <button class="button danger" type="submit">Удалить</button>
-          </form>
-          {% endif %}
         </div>
       </div>
       {% else %}
-      <p class="muted">{{ 'Студентов не найдено.' if page_kind == 'students' else 'Преподавателей не найдено.' }}</p>
+      <p class="muted">Преподавателей не найдено.</p>
       {% endfor %}
     </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
@@ -73,24 +118,34 @@
 {% block scripts %}
 <script>
   document.addEventListener('DOMContentLoaded', function () {
+    var groupToggles = document.querySelectorAll('[data-student-group-toggle]');
+    groupToggles.forEach(function (toggle) {
+      toggle.addEventListener('click', function () {
+        var container = toggle.closest('.group-column');
+        if (!container) return;
+        var opened = container.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', opened ? 'true' : 'false');
+      });
+    });
+
     var btn = document.getElementById('generate-teacher-password');
     var input = document.getElementById('teacher-password-input');
-    if (!btn || !input) return;
+    if (btn && input) {
+      var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+      var makePassword = function (len) {
+        var out = '';
+        for (var i = 0; i < len; i++) {
+          out += alphabet[Math.floor(Math.random() * alphabet.length)];
+        }
+        return out;
+      };
 
-    var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
-    var makePassword = function (len) {
-      var out = '';
-      for (var i = 0; i < len; i++) {
-        out += alphabet[Math.floor(Math.random() * alphabet.length)];
-      }
-      return out;
-    };
-
-    btn.addEventListener('click', function () {
-      input.value = makePassword(12);
-      input.focus();
-      input.select();
-    });
+      btn.addEventListener('click', function () {
+        input.value = makePassword(12);
+        input.focus();
+        input.select();
+      });
+    }
   });
 </script>
 {% endblock %}

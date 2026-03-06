@@ -958,12 +958,109 @@ def _finalize_questions(
     discipline_name: str | None = None,
 ) -> list[dict]:
     normalized = _normalize_questions(result, count, strict=True)
-    if len(normalized) >= count:
-        return normalized[:count]
+    if len(normalized) < count:
+        extra = _generate_fallback(text, max(count * 2, count + 6), difficulty, discipline_name)
+        normalized = _normalize_questions(normalized + extra, count, strict=False)
 
-    extra = _generate_fallback(text, max(count * 2, count + 6), difficulty, discipline_name)
-    merged = normalized + extra
-    return _normalize_questions(merged, count, strict=False)
+    if len(normalized) < count:
+        extra = _generate_fallback(text, max(count * 4, count + 20), difficulty, discipline_name)
+        normalized = _normalize_questions(normalized + extra, count, strict=False)
+
+    return _top_up_questions(normalized, text, count)
+
+
+def _top_up_questions(existing: list[dict], text: str, count: int) -> list[dict]:
+    if len(existing) >= count:
+        return existing[:count]
+
+    prepared = _prepare_source_text(text, max_chars=10000)
+    sentences = _extract_content_sentences(prepared, min_len=12, max_len=230)
+    if len(sentences) < 4:
+        for sentence in _sentences(prepared):
+            sentence_clean = _shorten_text(sentence, limit=100)
+            if len(sentence_clean) < 12:
+                continue
+            if sentence_clean.lower() in {s.lower() for s in sentences}:
+                continue
+            sentences.append(sentence_clean)
+            if len(sentences) >= 8:
+                break
+
+    if len(sentences) < 4:
+        sentences.extend(
+            [
+                "Ключевые понятия темы раскрываются через определения и примеры.",
+                "Материал лекции описывает связи между основными элементами темы.",
+                "В лекции акцент сделан на практическом применении рассмотренного подхода.",
+                "Тема включает типичные ошибки и способы их предотвращения.",
+            ]
+        )
+
+    # Делаем банк предложений компактным и уникальным, чтобы избежать одинаковых вариантов.
+    sentence_bank: list[str] = []
+    seen_sentences: set[str] = set()
+    for sentence in sentences:
+        compact = _shorten_text(re.sub(r"\s+", " ", sentence).strip(), limit=100)
+        key = compact.lower()
+        if not compact or key in seen_sentences:
+            continue
+        seen_sentences.add(key)
+        sentence_bank.append(compact)
+
+    if not sentence_bank:
+        sentence_bank = [
+            "Материал лекции описывает базовые понятия выбранной темы.",
+            "В лекции рассматриваются ключевые условия применения методов.",
+            "Содержание курса связывает теорию с практическими кейсами.",
+            "В теме выделены распространенные ошибки и их причины.",
+        ]
+
+    result = existing[:]
+    existing_keys = {
+        re.sub(r"\s+", " ", str(item.get("text", "")).strip().lower())
+        for item in result
+        if str(item.get("text", "")).strip()
+    }
+
+    cursor = 0
+    max_iterations = max(40, count * 10)
+    while len(result) < count and cursor < max_iterations:
+        q_text = f"Какое утверждение соответствует материалу лекции? (вопрос {len(result) + 1})"
+        q_key = q_text.lower()
+        if q_key in existing_keys:
+            cursor += 1
+            continue
+
+        correct = sentence_bank[cursor % len(sentence_bank)]
+        wrong_options: list[str] = []
+        used_option_keys = {correct.lower()}
+        shift = 1
+        while len(wrong_options) < 3 and shift <= len(sentence_bank) + 4:
+            candidate = sentence_bank[(cursor + shift) % len(sentence_bank)]
+            candidate_key = candidate.lower()
+            if candidate_key not in used_option_keys:
+                wrong_options.append(candidate)
+                used_option_keys.add(candidate_key)
+            shift += 1
+
+        filler_idx = 1
+        while len(wrong_options) < 3:
+            filler = f"Не отражает содержание лекции ({filler_idx})"
+            filler_idx += 1
+            filler_key = filler.lower()
+            if filler_key in used_option_keys:
+                continue
+            wrong_options.append(filler)
+            used_option_keys.add(filler_key)
+
+        options = [correct] + wrong_options[:3]
+        random.shuffle(options)
+        correct_index = options.index(correct)
+        result.append({"text": q_text, "options": options, "correct_index": correct_index})
+        existing_keys.add(q_key)
+        cursor += 1
+
+    return result[:count]
 
 
 def _build_prompt(
@@ -2219,5 +2316,9 @@ def generate_questions(
     allow_fallback = _cfg("AI_ALLOW_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
     if allow_fallback:
         raw = _generate_fallback(text, max(count * 2, count + 6), difficulty, discipline_name)
-        return _normalize_questions(raw, count, strict=False) if raw else []
+        normalized = _normalize_questions(raw, count, strict=False) if raw else []
+        if len(normalized) < count:
+            extra = _generate_fallback(text, max(count * 4, count + 20), difficulty, discipline_name)
+            normalized = _normalize_questions(normalized + extra, count, strict=False)
+        return _top_up_questions(normalized, text, count)
     return []

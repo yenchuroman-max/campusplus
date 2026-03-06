@@ -182,6 +182,7 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
 
 .header-shell {
   flex-wrap: nowrap;
+  row-gap: var(--sp-2);
 }
 
 .brand {
@@ -191,6 +192,7 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
   flex: 0 1 350px;
   min-width: 0;
   max-width: 350px;
+  overflow: hidden;
   text-decoration: none;
   color: var(--text);
 }
@@ -454,6 +456,78 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
 .nav .button { color: #fff; }
 
 .nav form.inline { margin: 0; display: inline-flex; }
+
+/* Stable desktop header for admin/teacher pages: logo stays fixed, search goes to row 2 */
+@media (min-width: 901px) {
+  body[class*="route-admin-"] .header-shell,
+  body[class*="route-v1-admin-"] .header-shell,
+  body[class*="route-v2-admin-"] .header-shell,
+  body[class*="route-teacher-"] .header-shell,
+  body[class*="route-v1-teacher-"] .header-shell,
+  body[class*="route-v2-teacher"] .header-shell {
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--sp-3);
+  }
+
+  body[class*="route-admin-"] .brand,
+  body[class*="route-v1-admin-"] .brand,
+  body[class*="route-v2-admin-"] .brand,
+  body[class*="route-teacher-"] .brand,
+  body[class*="route-v1-teacher-"] .brand,
+  body[class*="route-v2-teacher"] .brand {
+    order: 1;
+    flex: 0 1 auto;
+    max-width: 340px;
+  }
+
+  body[class*="route-admin-"] .nav,
+  body[class*="route-v1-admin-"] .nav,
+  body[class*="route-v2-admin-"] .nav,
+  body[class*="route-teacher-"] .nav,
+  body[class*="route-v1-teacher-"] .nav,
+  body[class*="route-v2-teacher"] .nav {
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+    margin-left: 0;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  body[class*="route-admin-"] .nav::-webkit-scrollbar,
+  body[class*="route-v1-admin-"] .nav::-webkit-scrollbar,
+  body[class*="route-v2-admin-"] .nav::-webkit-scrollbar,
+  body[class*="route-teacher-"] .nav::-webkit-scrollbar,
+  body[class*="route-v1-teacher-"] .nav::-webkit-scrollbar,
+  body[class*="route-v2-teacher"] .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  body[class*="route-admin-"] .theme-toggle,
+  body[class*="route-v1-admin-"] .theme-toggle,
+  body[class*="route-v2-admin-"] .theme-toggle,
+  body[class*="route-teacher-"] .theme-toggle,
+  body[class*="route-v1-teacher-"] .theme-toggle,
+  body[class*="route-v2-teacher"] .theme-toggle {
+    order: 3;
+    margin-left: 0;
+  }
+
+  body[class*="route-admin-"] .header-search,
+  body[class*="route-v1-admin-"] .header-search,
+  body[class*="route-v2-admin-"] .header-search,
+  body[class*="route-teacher-"] .header-search,
+  body[class*="route-v1-teacher-"] .header-search,
+  body[class*="route-v2-teacher"] .header-search {
+    order: 4;
+    flex: 1 1 100%;
+    max-width: none;
+    min-width: 0;
+  }
+}
 
 .nav-toggle {
   display: none;
@@ -1624,6 +1698,33 @@ input[type="file"]::file-selector-button {
 }
 .user-search input,
 .user-search .button { margin: 0; }
+
+.admin-student-groups {
+  display: grid;
+  gap: var(--sp-4);
+}
+.admin-student-group {
+  padding: 0;
+  overflow: hidden;
+}
+.admin-student-group-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.admin-student-group .group-toggle {
+  width: 100%;
+}
+.admin-student-group.open .group-toggle {
+  border-bottom: 1px solid var(--glass-border);
+}
+.admin-student-group-members {
+  padding: var(--sp-3);
+}
+.admin-student-group-list {
+  margin-top: 0;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
 
 /* ── Flashes / Alerts ──────────────────────────────────────── */
 .flash {

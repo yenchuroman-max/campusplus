@@ -2,34 +2,70 @@
 {% block teacher_content %}
 <div class="card">
   <div class="card-title">Студенты преподавателя</div>
-  {% if students %}
-    <div class="list" style="margin-top:10px;">
-      {% for s in students %}
-        <div class="card admin-card">
-          <div class="card-title">{{ s.full_name }}</div>
-          <div class="card-desc">Логин: {{ s.email }}</div>
-          <div class="muted">Группа: {{ s.student_group or 'Без группы' }}</div>
-          <div class="muted">Последний вход: {{ s.last_login }}</div>
-          <form method="post" action="/v2/teacher/students/{{ s.id }}/set_group?next=/v2/teacher/students" class="inline-group-form" style="margin-top:8px;">
-            <select name="student_group">
-              <option value="__none__">Без группы</option>
-              {% for g in available_groups %}
-                <option value="{{ g }}" {% if s.student_group == g %}selected{% endif %}>{{ g }}</option>
-              {% endfor %}
-            </select>
-            <button class="button secondary" type="submit">Переместить</button>
-          </form>
-          <div class="actions-inline" style="margin-top:8px;">
-            <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/edit">Редактировать</a>
-            <form method="post" action="/v2/teacher/students/{{ s.id }}/delete" onsubmit="return confirm('Удалить студента? Это действие необратимо.');" style="margin:0;">
-              <button class="button danger" type="submit">Удалить</button>
-            </form>
+  {% if grouped_students %}
+    <div class="admin-student-groups" style="margin-top:10px;">
+      {% for group in grouped_students %}
+      <section class="card group-column admin-student-group" data-group-name="{{ group.name }}">
+        <button
+          type="button"
+          class="group-toggle"
+          data-student-group-toggle
+          aria-expanded="false"
+          aria-controls="v2-students-group-{{ loop.index }}"
+        >
+          <span class="group-arrow" aria-hidden="true">›</span>
+          <span class="admin-student-group-title">{{ group.name }}</span>
+          <span class="muted" style="margin-left:auto;">Студентов: {{ group.count }}</span>
+        </button>
+        <div class="group-members admin-student-group-members" id="v2-students-group-{{ loop.index }}">
+          <div class="list admin-student-group-list">
+            {% for s in group.students %}
+              <div class="card admin-card">
+                <div class="card-title">{{ s.full_name }}</div>
+                <div class="card-desc">Логин: {{ s.email }}</div>
+                <div class="muted">Группа: {{ s.student_group or 'Без группы' }}</div>
+                <div class="muted">Последний вход: {{ s.last_login }}</div>
+                <form method="post" action="/v2/teacher/students/{{ s.id }}/set_group?next=/v2/teacher/students" class="inline-group-form" style="margin-top:8px;">
+                  <select name="student_group">
+                    <option value="__none__">Без группы</option>
+                    {% for g in available_groups %}
+                      <option value="{{ g }}" {% if s.student_group == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="button secondary" type="submit">Переместить</button>
+                </form>
+                <div class="actions-inline" style="margin-top:8px;">
+                  <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/edit">Редактировать</a>
+                  <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/performance">Успеваемость</a>
+                  <form method="post" action="/v2/teacher/students/{{ s.id }}/delete" onsubmit="return confirm('Удалить студента? Это действие необратимо.');" style="margin:0;">
+                    <button class="button danger" type="submit">Удалить</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
           </div>
         </div>
+      </section>
       {% endfor %}
     </div>
   {% else %}
     <p class="muted" style="margin-top:8px;">Закрепленных студентов пока нет.</p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-student-group-toggle]');
+    toggles.forEach(function (toggle) {
+      toggle.addEventListener('click', function () {
+        var container = toggle.closest('.group-column');
+        if (!container) return;
+        var opened = container.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', opened ? 'true' : 'false');
+      });
+    });
+  });
+</script>
 {% endblock %}

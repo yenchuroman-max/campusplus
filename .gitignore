@@ -8,5 +8,5 @@ __pycache__/
 server.out.log
 server.err.log
 uploads/
-app/app.db
+backups/
 tools/mingit/

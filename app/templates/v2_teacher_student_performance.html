@@ -1,0 +1,169 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+<div class="toolbar">
+  <h2>Успеваемость студента</h2>
+  <a class="button secondary" href="/v2/teacher/students">К студентам</a>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">{{ student.full_name }}</div>
+  <div class="card-desc">Логин: {{ student.email }}</div>
+  <div class="muted">Группа: {{ student.student_group if student.student_group else 'Без группы' }}</div>
+  <div class="muted">Последний вход: {{ student.last_login }}</div>
+
+  <form method="get" action="/v2/teacher/students/{{ student.id }}/performance" class="inline-group-form" style="margin-top:10px;">
+    <select name="discipline_id">
+      <option value="">Все дисциплины</option>
+      {% for d in disciplines %}
+        <option value="{{ d.id }}" {% if selected_discipline_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">Показать</button>
+  </form>
+</div>
+
+<div class="stats" style="margin-bottom:12px;">
+  <div class="stat">
+    <span class="stat-label">Тестов доступно</span>
+    <span class="stat-value">{{ summary.total_tests }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Пройдено тестов</span>
+    <span class="stat-value">{{ summary.completed_count }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Средний балл</span>
+    <span class="stat-value">{{ summary.average_score }}%</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Доля прохождения</span>
+    <span class="stat-value">{{ summary.completion_rate }}%</span>
+  </div>
+</div>
+
+{% if sparkline %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Динамика последних попыток</div>
+  <svg viewBox="0 0 280 72" role="img" aria-label="Динамика балла студента">
+    <rect x="0" y="0" width="280" height="72" rx="10" fill="rgba(255,255,255,0.02)"></rect>
+    <polyline points="{{ sparkline }}" fill="none" stroke="url(#studentPerfGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+    <defs>
+      <linearGradient id="studentPerfGrad" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0%" stop-color="#7a6cff"></stop>
+        <stop offset="100%" stop-color="#56d6ff"></stop>
+      </linearGradient>
+    </defs>
+  </svg>
+  <div class="sparkline-labels" style="margin-top:6px;">
+    {% if spark_points %}
+      <span>Начало: {{ spark_points[0] }}%</span>
+      <span>Текущее: {{ spark_points[-1] }}%</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if discipline_stats %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Сводка по дисциплинам</div>
+  <div class="table-wrap" style="margin-top:8px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Дисциплина</th>
+          <th>Тестов</th>
+          <th>Пройдено</th>
+          <th>Средний балл</th>
+          <th>Усвоение, %</th>
+          <th>Прошёл тест, %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in discipline_stats %}
+        <tr>
+          <td>{{ d.discipline }}</td>
+          <td>{{ d.tests_total }}</td>
+          <td>{{ d.completed }}</td>
+          <td>{{ d.avg_score }}</td>
+          <td>{{ d.completion_rate }}</td>
+          <td>{{ d.pass_rate }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Статус по тестам</div>
+  {% if tests %}
+  <div class="table-wrap" style="margin-top:8px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Дисциплина</th>
+          <th>Лекция</th>
+          <th>Тест</th>
+          <th>Статус</th>
+          <th>Балл</th>
+          <th>Дата</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tests %}
+        <tr>
+          <td>{{ t.discipline_name }}</td>
+          <td>{{ t.lecture_title }}</td>
+          <td>{{ t.test_title }}</td>
+          <td>
+            {% if t.is_completed %}
+              {{ 'Пройден' if t.is_passed else 'Нужна доработка' }}
+            {% else %}
+              Не выполнен
+            {% endif %}
+          </td>
+          <td>{{ t.score_value if t.score_value is not none else '—' }}</td>
+          <td>{{ t.taken_at_display if t.is_completed else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:8px;">По выбранной дисциплине нет тестов.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">История попыток</div>
+  {% if recent_attempts %}
+  <div class="table-wrap" style="margin-top:8px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Дисциплина</th>
+          <th>Тест</th>
+          <th>Балл</th>
+          <th>Итог</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in recent_attempts %}
+        <tr>
+          <td>{{ a.taken_at_display }}</td>
+          <td>{{ a.discipline_name }}</td>
+          <td>{{ a.test_title }}</td>
+          <td>{{ a.score }}</td>
+          <td>{{ 'Зачтено' if a.is_passed else 'Незачтено' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:8px;">Попыток пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}
