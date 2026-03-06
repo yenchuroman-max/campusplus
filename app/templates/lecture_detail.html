@@ -1,0 +1,134 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>{{ lecture.title }}</h2>
+  {% if lecture.original_filename %}
+    <a class="button secondary" href="/teacher/lectures/{{ lecture.id }}/download" style="margin-bottom:12px;display:inline-block;">📥 Скачать оригинал</a>
+  {% endif %}
+  <div class="lecture-body-wrap">
+    <p class="lecture-body is-collapsed" id="lecture-body-text" style="white-space:pre-line;">{{ lecture.body }}</p>
+    <button class="button secondary lecture-body-toggle" type="button" id="lecture-body-toggle" hidden>Показать полностью</button>
+  </div>
+  <form method="post" action="/teacher/lectures/{{ lecture.id }}/generate" id="generate-test-form">
+    <label>Количество вопросов</label>
+    <input type="number" name="question_count" min="1" max="50" value="10" />
+
+    <label>Сложность</label>
+    <select name="difficulty">
+      <option value="easy">Легкая</option>
+      <option value="medium" selected>Средняя</option>
+      <option value="hard">Сложная</option>
+    </select>
+
+    <button class="button" type="submit" id="generate-test-submit">Сгенерировать тест</button>
+    <div id="generate-test-loading" class="generate-loading" role="status" aria-live="polite" hidden>
+      <span class="generate-loading-spinner" aria-hidden="true"></span>
+      <span id="generate-test-loading-text">Тест в процессе создания, ожидайте.</span>
+    </div>
+  </form>
+</div>
+
+<h3>Тесты</h3>
+{% if tests %}
+  <div class="list">
+    {% for test in tests %}
+      <div class="card">
+        <h4>{{ test.title }}</h4>
+        <p>Статус: {{ test.status }}</p>
+        <div class="actions-inline">
+          <a class="button secondary" href="/teacher/tests/{{ test.id }}/edit">Редактировать</a>
+          <a class="button secondary" href="/teacher/tests/{{ test.id }}/qr">QR-код</a>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p>Пока нет тестов.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var lectureBody = document.getElementById('lecture-body-text');
+    var lectureToggle = document.getElementById('lecture-body-toggle');
+
+    if (lectureBody && lectureToggle) {
+      var COLLAPSED_CLASS = 'is-collapsed';
+      var hasOverflow = lectureBody.scrollHeight > lectureBody.clientHeight + 2;
+      if (hasOverflow) {
+        lectureToggle.hidden = false;
+      } else {
+        lectureBody.classList.remove(COLLAPSED_CLASS);
+      }
+
+      lectureToggle.addEventListener('click', function () {
+        var collapsed = lectureBody.classList.contains(COLLAPSED_CLASS);
+        if (collapsed) {
+          lectureBody.classList.remove(COLLAPSED_CLASS);
+          lectureToggle.textContent = 'Скрыть';
+        } else {
+          lectureBody.classList.add(COLLAPSED_CLASS);
+          lectureToggle.textContent = 'Показать полностью';
+        }
+      });
+    }
+
+    var form = document.getElementById('generate-test-form');
+    var submitBtn = document.getElementById('generate-test-submit');
+    var loading = document.getElementById('generate-test-loading');
+    var loadingText = document.getElementById('generate-test-loading-text');
+    if (!form || !submitBtn || !loading || !loadingText) return;
+
+    function resetGenerateUi() {
+      loading.hidden = true;
+      loadingText.textContent = 'Тест в процессе создания, ожидайте.';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Сгенерировать тест';
+      form.classList.remove('is-generating');
+    }
+
+    resetGenerateUi();
+    window.addEventListener('pageshow', resetGenerateUi);
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Генерация...';
+      loadingText.textContent = 'Тест в процессе создания, ожидайте.';
+      loading.hidden = false;
+      form.classList.add('is-generating');
+
+      var formData = new FormData(form);
+      fetch(form.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'same-origin'
+      })
+        .then(function (response) {
+          return response.json().catch(function () {
+            return { ok: false, message: 'Сервер вернул некорректный ответ.' };
+          });
+        })
+        .then(function (payload) {
+          if (!payload || !payload.ok || !payload.redirect) {
+            throw new Error((payload && payload.message) || 'Не удалось сгенерировать тест.');
+          }
+          loadingText.textContent = 'Готово! Открываем обновлённый список тестов...';
+          setTimeout(function () {
+            window.location.assign(payload.redirect);
+          }, 450);
+        })
+        .catch(function (error) {
+          loadingText.textContent = (error && error.message) ? error.message : 'Ошибка генерации. Попробуйте ещё раз.';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Сгенерировать тест';
+          form.classList.remove('is-generating');
+        });
+    });
+  })();
+</script>
+{% endblock %}

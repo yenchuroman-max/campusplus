@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Точки роста</h2>
+  {% if mistakes_total > 0 %}
+    <p>Найдено ошибок в ответах: <strong>{{ mistakes_total }}</strong>. Ниже темы, которые стоит прокачать в первую очередь.</p>
+  {% else %}
+    <p>Пока нет ошибок в попытках. Продолжайте проходить тесты — рекомендации появятся автоматически.</p>
+  {% endif %}
+</div>
+
+{% if topics %}
+  <div class="list growth-topics-list">
+    {% for item in topics %}
+      <div class="card growth-topic-card">
+        <h3>{{ item.topic }}</h3>
+        <p>{{ item.reason }}</p>
+        <a class="button secondary" href="{{ item.search_url }}" target="_blank" rel="noopener noreferrer">Материалы по теме</a>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if mistakes_preview %}
+  <div class="card growth-mistakes-card">
+    <h3>Последние ошибки</h3>
+    <div class="growth-mistakes-list">
+      {% for m in mistakes_preview %}
+        <div class="growth-mistake-item">
+          <div class="growth-mistake-head">
+            <strong>{{ m.test_title }}</strong>
+            <span>{{ m.taken_at }}</span>
+          </div>
+          <p>{{ m.question_text }}</p>
+          <p><span class="growth-label">Ваш ответ:</span> <span class="growth-wrong">{{ m.selected_text }}</span></p>
+          <p><span class="growth-label">Правильный ответ:</span> <span class="growth-correct">{{ m.correct_text }}</span></p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+{% if mistakes_total > 0 %}
+  <div class="actions">
+    <a class="button" href="/student/analytics">Открыть все попытки и разбор</a>
+  </div>
+{% endif %}
+{% endblock %}

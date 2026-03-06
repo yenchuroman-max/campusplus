@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Разбор попытки: {{ attempt.test_title }}</h2>
+  <p>Дата: {{ attempt.taken_at }}</p>
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-label">Балл</span>
+      <span class="stat-value">{{ attempt.score }}%</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Верно</span>
+      <span class="stat-value">{{ correct_count }} / {{ total_questions }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Ошибки</span>
+      <span class="stat-value">{{ wrong_count }}</span>
+    </div>
+  </div>
+</div>
+
+{% if review_items %}
+  <div class="list attempt-review-list">
+    {% for item in review_items %}
+      <div class="card attempt-review-item {% if item.is_correct %}attempt-ok{% else %}attempt-wrong{% endif %}">
+        <h3>{{ loop.index }}. {{ item.question_text }}</h3>
+        <div class="attempt-options">
+          {% for opt in item.options %}
+            <div class="attempt-option
+              {% if opt.is_correct %} is-correct{% endif %}
+              {% if opt.is_wrong_selected %} is-selected-wrong{% endif %}
+              {% if opt.is_selected and opt.is_correct %} is-selected-correct{% endif %}">
+              <span class="attempt-option-text">{{ opt.text }}</span>
+              {% if opt.is_selected and opt.is_correct %}
+                <span class="attempt-badge badge-correct">Ваш ответ</span>
+              {% elif opt.is_selected and not opt.is_correct %}
+                <span class="attempt-badge badge-wrong">Ваш ответ</span>
+              {% elif opt.is_correct %}
+                <span class="attempt-badge badge-right">Правильно</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <p>Детали этой попытки недоступны.</p>
+  </div>
+{% endif %}
+
+<div class="actions">
+  <a class="button" href="/growth">Перейти к точкам роста</a>
+  <a class="button secondary" href="/student/analytics">Назад к аналитике</a>
+</div>
+{% endblock %}

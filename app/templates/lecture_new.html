@@ -1,0 +1,259 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Новая лекция</h2>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/teacher/lectures/new" enctype="multipart/form-data">
+    <label>Название</label>
+    <input type="text" name="title" required />
+    {% if teacher_discipline_options %}
+      <label>Дисциплина</label>
+      <select name="discipline_id">
+        {% for d in teacher_discipline_options %}
+          <option value="{{ d.id }}" {% if selected_discipline_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="muted">Выберите дисциплину, к которой относится лекция.</div>
+    {% endif %}
+    {% if current_user and current_user.role == 'admin' %}
+      <label>Преподаватель</label>
+      <select name="teacher_id">
+        <option value="">-- выбрать преподавателя --</option>
+        {% for t in teachers %}
+          <option value="{{ t.id }}">{{ t.full_name }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+    <label>Текст лекции</label>
+    <textarea name="body" rows="10" id="lecture-body-input"></textarea>
+    <label>Или загрузить файл лекции (.txt, .docx, .pdf)</label>
+    <input type="file" name="lecture_file" accept=".txt,.docx,.pdf" />
+    <label>Или импортировать текст по ссылкам (Wikipedia/статьи)</label>
+    <textarea name="source_urls" id="source-urls-input" rows="4" placeholder="https://ru.wikipedia.org/wiki/...
+https://example.com/article"></textarea>
+    <div class="muted">Можно указать до 5 ссылок, по одной в строке (или через запятую).</div>
+    <div class="actions">
+      <button class="button secondary" type="button" id="import-urls-btn">Подтянуть текст из ссылок</button>
+    </div>
+    <div id="import-urls-status" class="import-status" role="status" aria-live="polite" hidden></div>
+    <button class="button" type="submit" id="save-lecture-btn">Сохранить</button>
+    <div id="upload-loading" class="generate-loading" role="status" aria-live="polite" hidden>
+      <span class="generate-loading-spinner" aria-hidden="true"></span>
+      <span id="upload-loading-text">Загрузка файла и извлечение текста, подождите...</span>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    // ── Индикатор загрузки при отправке формы ──
+    var form = document.querySelector('form[action="/teacher/lectures/new"]');
+    var saveBtn = document.getElementById('save-lecture-btn');
+    var uploadLoading = document.getElementById('upload-loading');
+    var uploadText = document.getElementById('upload-loading-text');
+    var fileInput = document.querySelector('input[name="lecture_file"]');
+
+    if (form && saveBtn && uploadLoading) {
+      form.addEventListener('submit', function () {
+        var hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
+        var fileName = hasFile ? fileInput.files[0].name : '';
+        var isPdf = fileName.toLowerCase().endsWith('.pdf');
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Загрузка...';
+        uploadLoading.hidden = false;
+
+        if (isPdf) {
+          uploadText.textContent = 'Загрузка PDF и извлечение текста из страниц — это может занять 10-20 секунд...';
+        } else if (hasFile) {
+          uploadText.textContent = 'Загрузка файла и извлечение текста...';
+        } else {
+          uploadText.textContent = 'Сохранение лекции...';
+        }
+
+        // Анимация точек
+        var dots = 0;
+        var base = uploadText.textContent.replace(/\.+$/, '');
+        var dotInterval = setInterval(function () {
+          dots = (dots + 1) % 4;
+          uploadText.textContent = base + '.'.repeat(dots + 1);
+        }, 600);
+
+        // Таймер прогресса для PDF
+        if (isPdf) {
+          var seconds = 0;
+          var timerInterval = setInterval(function () {
+            seconds++;
+            if (seconds >= 5 && seconds < 15) {
+              base = 'Извлекаем текст и обрабатываем изображения';
+            } else if (seconds >= 15) {
+              base = 'Почти готово, завершаем обработку';
+            }
+          }, 1000);
+
+          // Очищаем интервалы при уходе со страницы (форма отправлена, будет редирект)
+          window.addEventListener('beforeunload', function () {
+            clearInterval(dotInterval);
+            clearInterval(timerInterval);
+          });
+        }
+      });
+    }
+
+    // ── Импорт ссылок ──
+    var btn = document.getElementById('import-urls-btn');
+    var urlsInput = document.getElementById('source-urls-input');
+    var bodyInput = document.getElementById('lecture-body-input');
+    var status = document.getElementById('import-urls-status');
+    if (!btn || !urlsInput || !bodyInput || !status) return;
+
+    function setStatus(message, kind) {
+      status.hidden = false;
+      status.className = 'import-status ' + (kind || '');
+      status.textContent = message;
+    }
+
+    function parseUrls(raw) {
+      return String(raw || '')
+        .split(/[\n,;]+/)
+        .map(function (x) { return x.trim(); })
+        .filter(Boolean)
+        .map(function (x) {
+          if (!/^https?:\/\//i.test(x)) return 'https://' + x;
+          return x;
+        });
+    }
+
+    function isWikipediaUrl(url) {
+      try {
+        return /(^|\.)wikipedia\.org$/i.test(new URL(url).hostname);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function extractWikiTitle(url) {
+      var u = new URL(url);
+      var path = u.pathname || '';
+      if (path.indexOf('/wiki/') >= 0) {
+        return decodeURIComponent(path.split('/wiki/')[1] || '').replace(/_/g, ' ').trim();
+      }
+      var title = u.searchParams.get('title') || '';
+      return decodeURIComponent(title).replace(/_/g, ' ').trim();
+    }
+
+    function importWikipediaDirect(urls) {
+      var tasks = urls.map(function (url) {
+        var title = extractWikiTitle(url);
+        if (!title) return Promise.resolve('');
+        var api = new URL('https://ru.wikipedia.org/w/api.php');
+        api.searchParams.set('action', 'query');
+        api.searchParams.set('prop', 'extracts');
+        api.searchParams.set('explaintext', '1');
+        api.searchParams.set('redirects', '1');
+        api.searchParams.set('format', 'json');
+        api.searchParams.set('origin', '*');
+        api.searchParams.set('titles', title);
+        return fetch(api.toString(), { method: 'GET' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('Wikipedia API недоступен');
+            return r.json();
+          })
+          .then(function (data) {
+            var pages = data && data.query && data.query.pages ? data.query.pages : {};
+            var keys = Object.keys(pages);
+            if (!keys.length) return '';
+            var extract = String((pages[keys[0]] && pages[keys[0]].extract) || '').trim();
+            if (!extract) return '';
+            return 'Источник: ' + url + '\n' + extract;
+          });
+      });
+
+      return Promise.all(tasks).then(function (chunks) {
+        var merged = chunks.filter(Boolean).join('\n\n').trim();
+        if (!merged) throw new Error('Wikipedia не вернула текст для этих ссылок.');
+        return { text: merged, url_count: urls.length, char_count: merged.length };
+      });
+    }
+
+    btn.addEventListener('click', function () {
+      var raw = (urlsInput.value || '').trim();
+      if (!raw) {
+        setStatus('Добавьте хотя бы одну ссылку для импорта.', 'is-error');
+        return;
+      }
+
+      var urls = parseUrls(raw);
+      var onlyWikipedia = urls.length > 0 && urls.every(isWikipediaUrl);
+
+      btn.disabled = true;
+      btn.textContent = 'Импорт...';
+      setStatus('Импортируем текст из ссылок, подождите...', 'is-loading');
+
+      var formData = new FormData();
+      formData.append('source_urls', raw);
+
+      fetch('/teacher/lectures/import-urls', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin'
+      })
+        .then(function (response) {
+          return response.text().then(function (payload) {
+            var data = null;
+            try {
+              data = JSON.parse(payload);
+            } catch (_) {
+              data = { ok: false, error: payload && payload.trim() ? payload.trim().slice(0, 220) : 'Сервер вернул некорректный ответ.' };
+            }
+            return { ok: response.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok || !result.data || !result.data.ok) {
+            throw new Error((result.data && result.data.error) || 'Импорт не удался.');
+          }
+          var imported = String(result.data.text || '').trim();
+          if (!imported) {
+            throw new Error('Текст по ссылкам не найден.');
+          }
+          bodyInput.value = (bodyInput.value || '').trim()
+            ? ((bodyInput.value || '').trim() + '\n\n' + imported)
+            : imported;
+          setStatus(
+            'Готово: импортировано ' + (result.data.url_count || 0) + ' ссылок, ' + (result.data.char_count || imported.length) + ' символов.',
+            'is-success'
+          );
+        })
+        .catch(function (error) {
+          if (!onlyWikipedia) {
+            setStatus(error.message || 'Ошибка импорта ссылок.', 'is-error');
+            return;
+          }
+
+          setStatus('Серверный импорт недоступен, пробуем прямой импорт из Wikipedia...', 'is-loading');
+          importWikipediaDirect(urls)
+            .then(function (result) {
+              var imported = String(result.text || '').trim();
+              bodyInput.value = (bodyInput.value || '').trim()
+                ? ((bodyInput.value || '').trim() + '\n\n' + imported)
+                : imported;
+              setStatus(
+                'Готово (fallback): импортировано ' + result.url_count + ' ссылок, ' + result.char_count + ' символов.',
+                'is-success'
+              );
+            })
+            .catch(function (fallbackError) {
+              setStatus(fallbackError.message || 'Ошибка импорта ссылок.', 'is-error');
+            });
+        })
+        .finally(function () {
+          btn.disabled = false;
+          btn.textContent = 'Подтянуть текст из ссылок';
+        });
+    });
+  })();
+</script>
+{% endblock %}

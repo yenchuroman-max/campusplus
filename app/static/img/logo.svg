@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40" viewBox="0 0 160 40">
+  <rect rx="8" width="160" height="40" fill="#5b21b6"/>
+  <text x="20" y="26" font-family="Segoe UI, Arial" font-size="14" fill="#fff">ВУЗ</text>
+  <text x="54" y="26" font-family="Segoe UI, Arial" font-size="14" fill="#e7e3f7">AI-Успеваемость</text>
+</svg>

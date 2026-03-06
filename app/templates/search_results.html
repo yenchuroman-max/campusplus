@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" style="margin-bottom:12px;">
+  <h2 style="margin-bottom:10px;">Глобальный поиск</h2>
+  <form class="user-search" action="/search" method="get" role="search">
+    <label class="sr-only" for="search-page-input">Поиск по системе</label>
+    <input id="search-page-input" type="search" name="q" placeholder="Лекции, тесты, студенты, группы" value="{{ query if query else '' }}" />
+    <button class="button" type="submit">Найти</button>
+  </form>
+  {% if query %}
+    <p class="muted" style="margin-top:8px;">Запрос: «{{ query }}» · найдено: {{ result_total }}</p>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">Введите запрос и нажмите «Найти».</p>
+  {% endif %}
+</section>
+
+{% if query %}
+  {% if sections %}
+    {% for section in sections %}
+    <section class="card" style="margin-bottom:12px;">
+      <div class="card-title">{{ section["title"] }} <span class="muted">({{ section["items"]|length }})</span></div>
+      <div class="list" style="margin-top:10px;">
+        {% for item in section["items"] %}
+        <a class="card link-card clickable" href="{{ item.href }}">
+          <div class="card-title">{{ item.title }}</div>
+          <div class="card-desc">{{ item.meta }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  {% else %}
+    <section class="card">
+      <p class="muted">По вашему запросу пока ничего не найдено.</p>
+    </section>
+  {% endif %}
+{% endif %}
+{% endblock %}

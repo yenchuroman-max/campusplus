@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+{% set base_prefix = '/v1/admin' if request.url.path.startswith('/v1/admin') else '/admin' %}
+
+<div class="admin-groups-page">
+  <div class="admin-section-nav" style="margin-bottom:12px;">
+    <a class="tab-link" href="{{ base_prefix }}/students">Студенты</a>
+    <a class="tab-link" href="{{ base_prefix }}/teachers">Преподаватели</a>
+    <a class="tab-link" href="{{ base_prefix }}/groups">Группы</a>
+    <a class="tab-link active" href="{{ base_prefix }}/disciplines">Дисциплины</a>
+  </div>
+
+  <h2>Дисциплины</h2>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Добавить дисциплину</div>
+    <form method="post" action="{{ base_prefix }}/disciplines/create" class="inline-group-form create-group-form">
+      <input type="text" name="discipline_name" placeholder="Название дисциплины" required>
+      <button class="button" type="submit">Добавить</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Список дисциплин</div>
+    <div class="list" style="margin-top:10px;">
+      {% for d in disciplines %}
+      <div class="card admin-card">
+        <div class="card-title">{{ d.name }}</div>
+        <div class="muted">Преподавателей: {{ d.teacher_count }}</div>
+        <div class="muted">Лекций: {{ d.lecture_count }}</div>
+        <div class="muted">Тестов: {{ d.test_count }}</div>
+        <div class="actions-inline" style="margin-top:8px;">
+          <a class="button secondary" href="{{ base_prefix }}/disciplines/{{ d.id }}">Управление</a>
+        </div>
+      </div>
+      {% else %}
+      <div class="muted">Дисциплин пока нет.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+<div class="card narrow">
+  <h2>Редактирование студента</h2>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/v2/teacher/students/{{ student.id }}/edit">
+    <label>ФИО</label>
+    <input type="text" name="full_name" value="{{ student.full_name }}" required />
+
+    <label>Логин</label>
+    <input type="text" name="login" value="{{ student.email }}" required />
+
+    <label>Группа</label>
+    <select name="student_group">
+      <option value="__none__">Без группы</option>
+      {% for g in available_groups %}
+        <option value="{{ g }}" {% if student.student_group == g %}selected{% endif %}>{{ g }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="actions" style="margin-top:10px;">
+      <button class="button" type="submit">Сохранить</button>
+      <a class="button secondary" href="/v2/teacher/students">Отмена</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

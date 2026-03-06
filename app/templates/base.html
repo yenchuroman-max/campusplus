@@ -1,0 +1,219 @@
+﻿<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title if title else "КампусПлюс СГУГиТ" }}</title>
+    <script>
+      (function () {
+        var key = "ui-theme";
+        var theme = "light";
+        try {
+          var saved = localStorage.getItem(key);
+          if (saved === "light" || saved === "dark") {
+            theme = saved;
+          }
+        } catch (e) {}
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body class="route-{{ request.url.path.strip('/').replace('/', '-') if request.url.path != '/' else 'home' }}">
+    <header class="site-header">
+      <div class="container header-shell">
+        <a href="/" class="brand brand-with-logo" aria-label="КампусПлюс СГУГиТ">
+          <span class="brand-logo-shell" aria-hidden="true">
+            <img class="brand-logo" src="/static/img/sgugit-mark.png" alt="" />
+          </span>
+          <span class="brand-copy">
+            <span class="brand-name">КампусПлюс</span>
+            <span class="brand-role">
+              {% if request.url.path.startswith('/v1/admin') or request.url.path.startswith('/admin') or request.session.admin_authenticated %}
+                Администрирование СГУГиТ
+              {% elif current_user and current_user.role == 'teacher' %}
+                Рабочее пространство преподавателя
+              {% elif current_user and current_user.role == 'student' %}
+                Личный кабинет студента
+              {% else %}
+                Платформа контроля успеваемости
+              {% endif %}
+            </span>
+          </span>
+        </a>
+        <form class="header-search" action="/search" method="get" role="search">
+          <label class="sr-only" for="global-search">Поиск</label>
+          <input
+            id="global-search"
+            type="search"
+            name="q"
+            placeholder="Поиск: лекции, тесты, студенты"
+            autocomplete="off"
+            value="{{ global_search_query if global_search_query else '' }}"
+          />
+        </form>
+        <button
+          type="button"
+          class="nav-toggle"
+          data-nav-toggle
+          aria-label="Открыть меню"
+          aria-expanded="false"
+        >
+          <span class="nav-toggle-line"></span>
+          <span class="nav-toggle-line"></span>
+          <span class="nav-toggle-line"></span>
+        </button>
+        <button
+          type="button"
+          class="theme-toggle"
+          data-theme-toggle
+          role="switch"
+          aria-label="Переключить тему"
+          aria-checked="false"
+          title="Переключить тему"
+        >
+          <span class="theme-toggle-track" aria-hidden="true">
+            <span class="theme-toggle-dot"></span>
+          </span>
+          <span class="theme-toggle-label">Тема</span>
+        </button>
+        <nav class="nav">
+          {% if not is_index %}
+            <a href="/" class="nav-link icon-home">Главная</a>
+          {% endif %}
+          {% if current_user %}
+            {% if current_user.role == 'teacher' %}
+              <a href="/v2/teacher" class="link-button nav-link icon-teacher">Панель преподавателя</a>
+            {% elif current_user.role == 'admin' %}
+              <a href="/admin/students" class="link-button nav-link icon-students">Студенты</a>
+              <a href="/admin/teachers" class="link-button nav-link icon-teachers">Преподаватели</a>
+              <a href="/admin/groups" class="link-button nav-link icon-groups">Группы</a>
+              <a href="/admin/disciplines" class="link-button nav-link icon-disciplines">Дисциплины</a>
+            {% endif %}
+            {% if current_user.role != 'admin' %}
+              <a href="/dashboard" class="link-button nav-link icon-dashboard">Личный кабинет</a>
+            {% endif %}
+            <form action="/logout" method="post" class="inline">
+              <button class="link-button nav-link icon-logout" type="submit">Выйти</button>
+            </form>
+          {% elif request.session.admin_authenticated %}
+            <a href="/v1/admin/students" class="link-button nav-link icon-students">Студенты</a>
+            <a href="/v1/admin/teachers" class="link-button nav-link icon-teachers">Преподаватели</a>
+            <a href="/v1/admin/groups" class="link-button nav-link icon-groups">Группы</a>
+            <a href="/v1/admin/disciplines" class="link-button nav-link icon-disciplines">Дисциплины</a>
+            <form action="/v1/admin/logout" method="post" class="inline">
+              <button class="link-button nav-link icon-logout" type="submit">Выйти</button>
+            </form>
+          {% else %}
+            <a href="/login" class="button nav-link icon-login">Вход</a>
+            <a href="/register" class="button secondary nav-link icon-register">Регистрация</a>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+    {% if flashes %}
+      <div class="container">
+        {% for f in flashes %}
+          <div class="flash flash-{{ f.level }}">{{ f.message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+    <script>
+      (function () {
+        var body = document.body;
+        var toggle = document.querySelector('[data-nav-toggle]');
+        var nav = document.querySelector('.site-header .nav');
+        if (!body || !toggle || !nav) return;
+
+        body.classList.add('has-js');
+
+        var mobileMq = window.matchMedia('(max-width: 900px)');
+
+        function closeNav() {
+          body.classList.remove('nav-open');
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.setAttribute('aria-label', 'Открыть меню');
+        }
+
+        function openNav() {
+          body.classList.add('nav-open');
+          toggle.setAttribute('aria-expanded', 'true');
+          toggle.setAttribute('aria-label', 'Закрыть меню');
+        }
+
+        toggle.addEventListener('click', function () {
+          if (body.classList.contains('nav-open')) closeNav();
+          else openNav();
+        });
+
+        nav.querySelectorAll('a, button').forEach(function (item) {
+          item.addEventListener('click', function () {
+            if (mobileMq.matches) closeNav();
+          });
+        });
+
+        document.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape') closeNav();
+        });
+
+        document.addEventListener('click', function (event) {
+          if (!mobileMq.matches || !body.classList.contains('nav-open')) return;
+          if (event.target.closest('.site-header .container')) return;
+          closeNav();
+        });
+
+        var onMqChange = function (evt) {
+          if (!evt.matches) closeNav();
+        };
+        if (typeof mobileMq.addEventListener === 'function') {
+          mobileMq.addEventListener('change', onMqChange);
+        } else if (typeof mobileMq.addListener === 'function') {
+          mobileMq.addListener(onMqChange);
+        }
+      })();
+    </script>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var btn = document.querySelector("[data-theme-toggle]");
+        if (!root || !btn) return;
+
+        var key = "ui-theme";
+        var label = btn.querySelector(".theme-toggle-label");
+
+        function applyTheme(theme, persist) {
+          var normalized = theme === "light" ? "light" : "dark";
+          root.setAttribute("data-theme", normalized);
+          btn.setAttribute("aria-checked", normalized === "light" ? "true" : "false");
+          btn.setAttribute(
+            "aria-label",
+            normalized === "light" ? "Включить темную тему" : "Включить светлую тему"
+          );
+          btn.setAttribute(
+            "title",
+            normalized === "light" ? "Включить темную тему" : "Включить светлую тему"
+          );
+          if (label) {
+            label.textContent = normalized === "light" ? "Светлая" : "Тёмная";
+          }
+          if (persist) {
+            try {
+              localStorage.setItem(key, normalized);
+            } catch (e) {}
+          }
+        }
+
+        applyTheme(root.getAttribute("data-theme") || "light", false);
+
+        btn.addEventListener("click", function () {
+          var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+          applyTheme(next, true);
+        });
+      })();
+    </script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

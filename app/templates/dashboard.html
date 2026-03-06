@@ -1,0 +1,112 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<h2>Личный кабинет</h2>
+<p>Здравствуйте, {{ current_user.full_name }}</p>
+
+{% if current_user.role == "teacher" %}
+  {% if teacher_summary %}
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-label">Лекции</span>
+      <span class="stat-value">{{ teacher_summary.lecture_total }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Тесты</span>
+      <span class="stat-value">{{ teacher_summary.test_total }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Студенты</span>
+      <span class="stat-value">{{ teacher_summary.student_total }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Средний балл группы</span>
+      <span class="stat-value">{{ teacher_summary.average_score }}%</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="grid">
+    <a class="card link-card" href="/teacher/lectures">
+      <h3>Мои лекции</h3>
+      <p>Создать лекцию и сгенерировать тест.</p>
+    </a>
+    <a class="card link-card" href="/v2/teacher/tests">
+      <h3>Панель преподавателя</h3>
+      <p>Вкладки: тесты, студенты и успеваемость в одном месте.</p>
+    </a>
+    <a class="card link-card" href="/teacher/analytics">
+      <h3>Аналитика группы</h3>
+      <p>Сводные показатели по тестам и студентам.</p>
+    </a>
+    <a class="card link-card" href="/v2/teacher/disciplines">
+      <h3>Мониторинг по дисциплинам</h3>
+      <p>Динамика среднего балла и усвоения материала.</p>
+    </a>
+  </div>
+{% elif current_user.role == "student" %}
+  <div class="grid">
+    <a class="card link-card" href="/student/tests">
+      <h3>Доступные тесты</h3>
+      <p>Проходите тесты и получайте баллы.</p>
+    </a>
+    <a class="card link-card" href="/student/analytics">
+      <h3>Аналитика</h3>
+      <p>Средние показатели и динамика.</p>
+    </a>
+    <a class="card link-card" href="/growth">
+      <h3>Точки роста</h3>
+      <p>Темы для улучшения на основе ваших ошибок.</p>
+    </a>
+  </div>
+
+  {% if student_disciplines %}
+  <div class="card" style="margin-top:14px;">
+    <h3>Дисциплины</h3>
+    <p class="muted">Переходите в тесты по дисциплине вашего преподавателя.</p>
+    <div class="teachers-list" style="margin-top:8px;">
+      {% for d in student_disciplines %}
+        <a class="teacher-chip" href="/student/tests?discipline_id={{ d.id }}">{{ d.name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card" style="margin-top:14px;">
+    <h3>История тестирований</h3>
+    <p class="muted">Одна попытка на тест. После прохождения доступен разбор ошибок и точки роста.</p>
+    {% if testing_history %}
+      <div class="table-wrap" style="margin-top:8px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Тест</th>
+              <th>Дата</th>
+              <th>Балл</th>
+              <th>Разбор</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in testing_history %}
+              <tr>
+                <td>{{ item.test_title }}</td>
+                <td>{{ item.taken_at }}</td>
+                <td>{{ item.score }}</td>
+                <td><a href="/student/attempts/{{ item.attempt_id }}">Ошибки</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Пока нет завершённых тестов.</p>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="grid">
+    <a class="card link-card" href="/admin/users">
+      <h3>Пользователи</h3>
+      <p>Список всех пользователей системы.</p>
+    </a>
+  </div>
+{% endif %}
+{% endblock %}

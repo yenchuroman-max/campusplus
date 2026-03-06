@@ -1,0 +1,50 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+{% if disciplines %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Дисциплина</div>
+  <form method="get" action="/v2/teacher/tests" class="inline-group-form" style="margin-top:8px;">
+    <select name="discipline_id">
+      {% for d in disciplines %}
+        <option value="{{ d.id }}" {% if selected_discipline_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">Показать</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Создание тестов</div>
+  <div class="card-desc">Создание тестов доступно через лекции: добавьте лекцию и сгенерируйте тест.</div>
+  <div style="margin-top:10px; display:flex; gap:8px;">
+    <a class="button" href="/teacher/lectures/new">Новая лекция</a>
+    <a class="button secondary" href="/teacher/lectures">К списку лекций</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Список тестов</div>
+  {% if tests %}
+    <div class="list" style="margin-top:10px;">
+      {% for t in tests %}
+        <div class="card admin-card">
+          <div class="card-title">{{ t.title }}</div>
+          <div class="muted">Лекция: {{ t.lecture_title }}</div>
+          <div class="muted">Статус: {{ t.status }}</div>
+          <div class="muted">Создан: {{ t.created_at }}</div>
+          <div class="actions-inline">
+            <a class="button secondary" href="/teacher/tests/{{ t.id }}/edit">Редактировать</a>
+            <a class="button secondary" href="/teacher/tests/{{ t.id }}/qr">QR-код</a>
+            <form method="post" action="/teacher/tests/{{ t.id }}/delete" onsubmit="return confirm('Удалить тест? Это действие необратимо.');" style="margin:0;">
+              <button class="button danger" type="submit">Удалить</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">Тестов пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}

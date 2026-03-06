@@ -1,0 +1,4178 @@
+﻿from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+import json
+import os
+import shutil
+import uuid
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import quote_plus
+
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+from app.ai import diagnose_ai_setup, generate_growth_topics, generate_questions
+from app.db import connect, init_db
+from app.lecture_import import (
+    LectureImportError,
+    extract_lecture_text,
+    extract_text_from_urls,
+    parse_source_urls,
+)
+
+UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+from app.security import (
+    CSRF_FIELD_NAME,
+    generate_csrf_token,
+    hash_password,
+    login_limiter,
+    needs_rehash,
+    new_salt,
+    sanitize_full_name,
+    sanitize_string,
+    validate_login,
+    validate_password,
+    verify_csrf_token,
+    verify_password,
+)
+
+
+def _extract_text_from_bytes(raw_bytes: bytes, filename: str) -> str:
+    """Извлечение текста из байтов файла (вызывается в thread pool)."""
+    if not raw_bytes:
+        raise LectureImportError("Файл пустой.")
+    from app.lecture_import import _extract_text_from_file_bytes
+
+    return _extract_text_from_file_bytes(raw_bytes, filename)
+
+
+def format_last_login(ts: str | None) -> str:
+    if not ts:
+        return "-"
+    try:
+        # input stored as ISO format
+        dt = datetime.fromisoformat(ts)
+        return dt.strftime("%d.%m.%Y")
+    except Exception:
+        return ts
+
+
+def user_row_to_dict(row) -> dict:
+    d = dict(row)
+    d["last_login"] = format_last_login(d.get("last_login"))
+    return d
+
+
+def fetch_managed_groups(cur) -> list[dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT g.name, g.teacher_id, u.full_name AS teacher_name
+        FROM groups g
+        LEFT JOIN users u ON u.id = g.teacher_id
+        ORDER BY g.name
+        """
+    )
+    groups = [dict(r) for r in cur.fetchall()]
+    names = {g.get("name") for g in groups}
+    if "Без группы" not in names:
+        groups.append({"name": "Без группы", "teacher_id": None, "teacher_name": None})
+    return groups
+
+
+def find_group_teacher_id(cur, group_name: str) -> int | None:
+    normalized = (group_name or "").strip()
+    if not normalized or normalized == "Без группы":
+        return None
+    cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (normalized,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    teacher_id = row["teacher_id"]
+    return int(teacher_id) if teacher_id else None
+
+
+def get_discipline_map(cur) -> dict[int, str]:
+    cur.execute("SELECT id, name FROM disciplines ORDER BY name")
+    return {int(row["id"]): row["name"] for row in cur.fetchall()}
+
+
+def normalize_discipline_name(name: str) -> str:
+    return " ".join((name or "").strip().split())
+
+
+def create_or_get_discipline(cur, name: str) -> tuple[int, bool]:
+    normalized = normalize_discipline_name(name)
+    cur.execute("SELECT id FROM disciplines WHERE lower(name) = lower(?)", (normalized,))
+    existing = cur.fetchone()
+    if existing:
+        return int(existing["id"]), False
+
+    cur.execute("INSERT INTO disciplines (name) VALUES (?)", (normalized,))
+    return int(cur.lastrowid), True
+
+
+def get_teacher_discipline_ids(cur, teacher_id: int | None) -> list[int]:
+    if not teacher_id:
+        return []
+    cur.execute(
+        """
+        SELECT td.discipline_id
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (teacher_id,),
+    )
+    return [int(row["discipline_id"]) for row in cur.fetchall()]
+
+
+def get_teacher_disciplines(cur, teacher_id: int | None) -> list[dict[str, Any]]:
+    if not teacher_id:
+        return []
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (teacher_id,),
+    )
+    return [dict(row) for row in cur.fetchall()]
+
+
+def get_teacher_discipline_id(cur, teacher_id: int | None) -> int | None:
+    ids = get_teacher_discipline_ids(cur, teacher_id)
+    return ids[0] if ids else None
+
+
+def ensure_catalog_groups(groups_map: dict[str, list[dict]], managed_groups: list[dict[str, Any]]) -> dict[str, list[dict]]:
+    for g in managed_groups:
+        name = (g.get("name") or "").strip()
+        if not name:
+            continue
+        groups_map.setdefault(name, [])
+    groups_map.setdefault("Без группы", groups_map.get("Без группы", []))
+    return groups_map
+
+
+def build_groups_page_context(cur, selected_group: str | None = None) -> dict[str, Any]:
+    cur.execute("SELECT id, full_name, email FROM users WHERE role = 'teacher' ORDER BY full_name")
+    teachers = [dict(r) for r in cur.fetchall()]
+    managed_groups = fetch_managed_groups(cur)
+    cur.execute("SELECT id, full_name, student_group FROM users WHERE role = 'student' ORDER BY full_name")
+    assign_students = [dict(r) for r in cur.fetchall()]
+
+    selected = None
+    if selected_group:
+        name = selected_group.strip()
+        teacher_card = None
+        if name != "Без группы":
+            cur.execute(
+                """
+                SELECT g.name, g.teacher_id, u.full_name AS teacher_name, u.email AS teacher_email
+                FROM groups g
+                LEFT JOIN users u ON u.id = g.teacher_id
+                WHERE g.name = ?
+                """,
+                (name,),
+            )
+            group_row = cur.fetchone()
+            if group_row and group_row["teacher_id"]:
+                teacher_card = {
+                    "id": group_row["teacher_id"],
+                    "full_name": group_row["teacher_name"],
+                    "email": group_row["teacher_email"],
+                }
+
+        if name == "Без группы":
+            cur.execute(
+                """
+                SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
+                FROM users
+                WHERE role = 'student' AND (student_group IS NULL OR student_group = '')
+                ORDER BY full_name
+                """
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
+                FROM users
+                WHERE role = 'student' AND student_group = ?
+                ORDER BY full_name
+                """,
+                (name,),
+            )
+        members = [user_row_to_dict(r) for r in cur.fetchall()]
+        selected = {"name": name, "teacher": teacher_card, "members": members}
+
+    return {
+        "teachers": teachers,
+        "managed_groups": managed_groups,
+        "assign_students": assign_students,
+        "selected_group": selected,
+    }
+
+
+def fetch_users_by_role(cur, role: str, query: str = "") -> list[dict[str, Any]]:
+    q = (query or "").strip()
+    if q:
+        cur.execute(
+            "SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE role = ? AND full_name LIKE ? ORDER BY full_name",
+            (role, f"%{q}%"),
+        )
+    else:
+        cur.execute(
+            "SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE role = ? ORDER BY full_name",
+            (role,),
+        )
+    return [user_row_to_dict(r) for r in cur.fetchall()]
+
+
+def _role_label(role: str) -> str:
+    normalized = (role or "").strip().lower()
+    if normalized == "student":
+        return "Студент"
+    if normalized == "teacher":
+        return "Преподаватель"
+    if normalized == "admin":
+        return "Администратор"
+    return normalized or "Пользователь"
+
+
+def build_global_search_sections(cur, user: dict | None, query: str, limit_per_section: int = 8) -> list[dict[str, Any]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    like = f"%{q}%"
+    role = (user or {}).get("role")
+    sections: list[dict[str, Any]] = []
+
+    if role == "student":
+        if user.get("assigned_teacher_id"):
+            cur.execute(
+                """
+                SELECT t.id, t.title, l.title AS lecture_title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
+                FROM tests t
+                JOIN lectures l ON l.id = t.lecture_id
+                LEFT JOIN disciplines d ON d.id = l.discipline_id
+                WHERE t.status = 'published' AND l.teacher_id = ?
+                  AND (t.title LIKE ? OR l.title LIKE ? OR COALESCE(d.name, '') LIKE ?)
+                ORDER BY t.id DESC
+                LIMIT ?
+                """,
+                (user["assigned_teacher_id"], like, like, like, limit_per_section),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT t.id, t.title, l.title AS lecture_title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
+                FROM tests t
+                JOIN lectures l ON l.id = t.lecture_id
+                LEFT JOIN disciplines d ON d.id = l.discipline_id
+                WHERE t.status = 'published'
+                  AND (t.title LIKE ? OR l.title LIKE ? OR COALESCE(d.name, '') LIKE ?)
+                ORDER BY t.id DESC
+                LIMIT ?
+                """,
+                (like, like, like, limit_per_section),
+            )
+        tests_items = [
+            {
+                "title": row["title"],
+                "meta": f"{row['lecture_title']} · {row['discipline_name']}",
+                "href": f"/student/tests/{int(row['id'])}/entry",
+            }
+            for row in cur.fetchall()
+        ]
+        if tests_items:
+            sections.append({"title": "Тесты", "items": tests_items})
+
+        if user.get("assigned_teacher_id"):
+            cur.execute(
+                """
+                SELECT d.id, d.name
+                FROM teacher_disciplines td
+                JOIN disciplines d ON d.id = td.discipline_id
+                WHERE td.teacher_id = ? AND d.name LIKE ?
+                ORDER BY d.name
+                LIMIT ?
+                """,
+                (user["assigned_teacher_id"], like, limit_per_section),
+            )
+        else:
+            cur.execute(
+                "SELECT id, name FROM disciplines WHERE name LIKE ? ORDER BY name LIMIT ?",
+                (like, limit_per_section),
+            )
+        discipline_items = [
+            {"title": row["name"], "meta": "Дисциплина", "href": f"/student/tests?discipline_id={int(row['id'])}"}
+            for row in cur.fetchall()
+        ]
+        if discipline_items:
+            sections.append({"title": "Дисциплины", "items": discipline_items})
+
+        return sections
+
+    if role == "teacher":
+        cur.execute(
+            """
+            SELECT l.id, l.title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM lectures l
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            WHERE l.teacher_id = ?
+              AND (l.title LIKE ? OR l.body LIKE ? OR COALESCE(d.name, '') LIKE ?)
+            ORDER BY l.id DESC
+            LIMIT ?
+            """,
+            (user["id"], like, like, like, limit_per_section),
+        )
+        lecture_items = [
+            {
+                "title": row["title"],
+                "meta": f"Лекция · {row['discipline_name']}",
+                "href": f"/teacher/lectures/{int(row['id'])}",
+            }
+            for row in cur.fetchall()
+        ]
+        if lecture_items:
+            sections.append({"title": "Лекции", "items": lecture_items})
+
+        cur.execute(
+            """
+            SELECT t.id, t.title, t.status, l.title AS lecture_title
+            FROM tests t
+            JOIN lectures l ON l.id = t.lecture_id
+            WHERE l.teacher_id = ?
+              AND (t.title LIKE ? OR l.title LIKE ?)
+            ORDER BY t.id DESC
+            LIMIT ?
+            """,
+            (user["id"], like, like, limit_per_section),
+        )
+        test_items = [
+            {
+                "title": row["title"],
+                "meta": f"Тест ({row['status']}) · {row['lecture_title']}",
+                "href": f"/teacher/tests/{int(row['id'])}/edit",
+            }
+            for row in cur.fetchall()
+        ]
+        if test_items:
+            sections.append({"title": "Тесты", "items": test_items})
+
+        cur.execute(
+            """
+            SELECT id, full_name, email, COALESCE(student_group, '') AS student_group
+            FROM users
+            WHERE role = 'student' AND assigned_teacher_id = ?
+              AND (full_name LIKE ? OR email LIKE ? OR COALESCE(student_group, '') LIKE ?)
+            ORDER BY full_name
+            LIMIT ?
+            """,
+            (user["id"], like, like, like, limit_per_section),
+        )
+        student_items = [
+            {
+                "title": row["full_name"],
+                "meta": f"Логин: {row['email']}" + (f" · {row['student_group']}" if row["student_group"] else ""),
+                "href": f"/v2/teacher/students/{int(row['id'])}/edit",
+            }
+            for row in cur.fetchall()
+        ]
+        if student_items:
+            sections.append({"title": "Студенты", "items": student_items})
+
+        cur.execute(
+            """
+            SELECT d.id, d.name
+            FROM teacher_disciplines td
+            JOIN disciplines d ON d.id = td.discipline_id
+            WHERE td.teacher_id = ? AND d.name LIKE ?
+            ORDER BY d.name
+            LIMIT ?
+            """,
+            (user["id"], like, limit_per_section),
+        )
+        discipline_items = [
+            {"title": row["name"], "meta": "Дисциплина", "href": "/v2/teacher/disciplines"}
+            for row in cur.fetchall()
+        ]
+        if discipline_items:
+            sections.append({"title": "Дисциплины", "items": discipline_items})
+
+        return sections
+
+    if role == "admin":
+        cur.execute(
+            """
+            SELECT l.id, l.title, COALESCE(d.name, 'Без дисциплины') AS discipline_name, u.full_name AS teacher_name
+            FROM lectures l
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            LEFT JOIN users u ON u.id = l.teacher_id
+            WHERE l.title LIKE ? OR l.body LIKE ? OR COALESCE(d.name, '') LIKE ?
+            ORDER BY l.id DESC
+            LIMIT ?
+            """,
+            (like, like, like, limit_per_section),
+        )
+        lecture_items = [
+            {
+                "title": row["title"],
+                "meta": f"Лекция · {row['discipline_name']}" + (f" · {row['teacher_name']}" if row["teacher_name"] else ""),
+                "href": f"/teacher/lectures/{int(row['id'])}",
+            }
+            for row in cur.fetchall()
+        ]
+        if lecture_items:
+            sections.append({"title": "Лекции", "items": lecture_items})
+
+        cur.execute(
+            """
+            SELECT t.id, t.title, t.status, l.title AS lecture_title
+            FROM tests t
+            JOIN lectures l ON l.id = t.lecture_id
+            WHERE t.title LIKE ? OR l.title LIKE ?
+            ORDER BY t.id DESC
+            LIMIT ?
+            """,
+            (like, like, limit_per_section),
+        )
+        test_items = [
+            {
+                "title": row["title"],
+                "meta": f"Тест ({row['status']}) · {row['lecture_title']}",
+                "href": f"/teacher/tests/{int(row['id'])}/edit",
+            }
+            for row in cur.fetchall()
+        ]
+        if test_items:
+            sections.append({"title": "Тесты", "items": test_items})
+
+        cur.execute(
+            """
+            SELECT id, role, full_name, email, COALESCE(student_group, '') AS student_group
+            FROM users
+            WHERE full_name LIKE ? OR email LIKE ? OR COALESCE(student_group, '') LIKE ?
+            ORDER BY full_name
+            LIMIT ?
+            """,
+            (like, like, like, limit_per_section),
+        )
+        user_items = [
+            {
+                "title": row["full_name"],
+                "meta": f"{_role_label(row['role'])} · Логин: {row['email']}"
+                + (f" · {row['student_group']}" if row["student_group"] else ""),
+                "href": f"/admin/users/{int(row['id'])}/edit",
+            }
+            for row in cur.fetchall()
+        ]
+        if user_items:
+            sections.append({"title": "Пользователи", "items": user_items})
+
+        cur.execute(
+            "SELECT id, name FROM disciplines WHERE name LIKE ? ORDER BY name LIMIT ?",
+            (like, limit_per_section),
+        )
+        discipline_items = [
+            {"title": row["name"], "meta": "Дисциплина", "href": f"/admin/disciplines/{int(row['id'])}"}
+            for row in cur.fetchall()
+        ]
+        if discipline_items:
+            sections.append({"title": "Дисциплины", "items": discipline_items})
+
+        cur.execute(
+            "SELECT name FROM groups WHERE name LIKE ? ORDER BY name LIMIT ?",
+            (like, limit_per_section),
+        )
+        group_items = [
+            {
+                "title": row["name"],
+                "meta": "Группа",
+                "href": f"/admin/groups/{str(row['name']).replace(' ', '_')}",
+            }
+            for row in cur.fetchall()
+        ]
+        if group_items:
+            sections.append({"title": "Группы", "items": group_items})
+
+        return sections
+
+    quick_items = [
+        {"title": "Вход", "meta": "Авторизация в системе", "href": "/login"},
+        {"title": "Регистрация студента", "meta": "Создать учетную запись студента", "href": "/register"},
+    ]
+    return [{"title": "Быстрые ссылки", "items": quick_items}]
+
+BASE_DIR = Path(__file__).resolve().parent
+
+if load_dotenv:
+    load_dotenv(BASE_DIR / ".env")
+
+app = FastAPI(
+    title="КампусПлюс СГУГиТ — API",
+    description=(
+        "REST JSON API платформы мониторинга успеваемости студентов.\n\n"
+        "Все эндпоинты `/api/*` возвращают JSON и отображаются в Swagger.\n"
+        "HTML-маршруты (фронтенд) скрыты из документации."
+    ),
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+_session_secret = os.environ.get("SESSION_SECRET_KEY") or os.environ.get("SECRET_KEY") or "dev-secret-change-me"
+app.add_middleware(SessionMiddleware, secret_key=_session_secret)
+
+# ── JSON API (виден в /docs) ────────────────────────────────────
+from app.api import router as api_router  # noqa: E402
+app.include_router(api_router)
+
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
+
+def get_current_user(request: Request) -> dict | None:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def require_user(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user:
+        raise RedirectResponse("/login", status_code=302)
+    return user
+
+
+def render(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse:
+    base = {"request": request, "current_user": get_current_user(request)}
+    # pop flashes from session and pass to template
+    flashes = request.session.pop("flashes", []) if request.session.get("flashes") else []
+    base["flashes"] = flashes
+    # CSRF-токен для всех шаблонов
+    base["csrf_token"] = generate_csrf_token(request.session)
+    base["global_search_query"] = (request.query_params.get("q") or "").strip()
+    base.update(context)
+    return templates.TemplateResponse(name, base)
+
+
+def add_flash(request: Request, message: str, level: str = "info") -> None:
+    fs = request.session.get("flashes") or []
+    fs.append({"message": message, "level": level})
+    request.session["flashes"] = fs
+
+
+def audit_log(request: Request | None, action: str, target_user_id: int | None = None, details: str | None = None) -> None:
+    try:
+        conn = connect()
+        cur = conn.cursor()
+        actor_email = None
+        actor_role = None
+        if request:
+            # prefer admin session email if present
+            actor_email = request.session.get("admin_email") or request.session.get("user_email")
+            # get current_user role if available
+            cu = get_current_user(request)
+            if cu:
+                actor_role = cu.get("role")
+        cur.execute(
+            "INSERT INTO audit (actor_email, actor_role, action, target_user_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (actor_email, actor_role, action, target_user_id, details, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        # do not fail main flow on logging errors
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def make_sparkline(points: list[float], width: int = 260, height: int = 60) -> str:
+    if not points:
+        return ""
+    min_v = min(points)
+    max_v = max(points)
+    span = max_v - min_v if max_v != min_v else 1.0
+    step_x = width / max(1, len(points) - 1)
+    coords = []
+    for i, v in enumerate(points):
+        x = i * step_x
+        y = height - ((v - min_v) / span) * height
+        coords.append(f"{x:.1f},{y:.1f}")
+    return " ".join(coords)
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    init_db()
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    search_query = (request.query_params.get("q") or "").strip()
+    if search_query:
+        return RedirectResponse(f"/search?q={quote_plus(search_query)}", status_code=302)
+
+    chart_data = {
+        "is_real": False,
+        "line_points": "20,142 80,126 138,132 192,108 246,114 300,82 356,66 400,44",
+        "area_path": "M20 142 L80 126 L138 132 L192 108 L246 114 L300 82 L356 66 L400 44 L400 150 L20 150 Z",
+        "final_x": 400,
+        "final_y": 44,
+        "avg": "82%",
+        "activity": "98",
+        "trend": "↑ вверх",
+        "trend_class": "metric-up",
+        "chip": "+24%",
+    }
+
+    current = get_current_user(request)
+    if current and current.get("role") == "student":
+        chart_data = {
+            "is_real": True,
+            "line_points": "20,140 146,140 273,140 400,140",
+            "area_path": "M20 140 L146 140 L273 140 L400 140 L400 150 L20 150 Z",
+            "final_x": 400,
+            "final_y": 140,
+            "avg": "0%",
+            "activity": "0",
+            "trend": "→ нет данных",
+            "trend_class": "metric-neutral",
+            "chip": "0%",
+        }
+
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT score
+            FROM attempts
+            WHERE student_id = ?
+            ORDER BY taken_at DESC
+            LIMIT 8
+            """,
+            (current["id"],),
+        )
+        raw_scores = [float(r["score"]) for r in cur.fetchall()]
+        cur.execute("SELECT COUNT(*) AS cnt FROM attempts WHERE student_id = ?", (current["id"],))
+        total_attempts = int(cur.fetchone()["cnt"])
+        conn.close()
+
+        if raw_scores:
+            scores = list(reversed(raw_scores))
+            min_v = min(scores)
+            max_v = max(scores)
+            span = (max_v - min_v) if max_v != min_v else 1.0
+
+            left, right = 20.0, 400.0
+            top, bottom = 44.0, 142.0
+            width = right - left
+            height = bottom - top
+            step_x = width / max(1, len(scores) - 1)
+
+            points: list[tuple[float, float]] = []
+            for i, value in enumerate(scores):
+                x = left + (i * step_x)
+                y = bottom - (((value - min_v) / span) * height)
+                points.append((x, y))
+
+            line_points = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+            area_path = (
+                "M"
+                + " L".join(f"{x:.1f} {y:.1f}" for x, y in points)
+                + f" L{right:.1f} 150 L{left:.1f} 150 Z"
+            )
+
+            avg_score = round(sum(scores) / len(scores), 1)
+            trend_value = 0.0
+            if len(scores) >= 2:
+                trend_value = round(scores[-1] - scores[-2], 1)
+
+            if trend_value > 0:
+                trend_text = f"↑ +{trend_value}%"
+                trend_class = "metric-up"
+                chip = f"+{trend_value}%"
+            elif trend_value < 0:
+                trend_text = f"↓ {trend_value}%"
+                trend_class = "metric-down"
+                chip = f"{trend_value}%"
+            else:
+                trend_text = "→ без изменений"
+                trend_class = "metric-neutral"
+                chip = "0%"
+
+            chart_data = {
+                "is_real": True,
+                "line_points": line_points,
+                "area_path": area_path,
+                "final_x": round(points[-1][0], 1),
+                "final_y": round(points[-1][1], 1),
+                "avg": f"{avg_score}%",
+                "activity": str(total_attempts),
+                "trend": trend_text,
+                "trend_class": trend_class,
+                "chip": chip,
+            }
+
+    # mark this render as the index so templates can hide certain nav items
+    return render(
+        request,
+        "index.html",
+        {"is_index": True, "title": "КампусПлюс СГУГиТ", "main_chart": chart_data},
+    )
+
+
+@app.get("/search", response_class=HTMLResponse)
+def global_search(request: Request):
+    query = (request.query_params.get("q") or "").strip()
+    sections: list[dict[str, Any]] = []
+    if query:
+        conn = connect()
+        cur = conn.cursor()
+        sections = build_global_search_sections(cur, get_current_user(request), query)
+        conn.close()
+
+    result_total = sum(len(section.get("items", [])) for section in sections)
+    return render(
+        request,
+        "search_results.html",
+        {
+            "title": "Поиск",
+            "query": query,
+            "sections": sections,
+            "result_total": result_total,
+        },
+    )
+
+
+@app.get("/register", response_class=HTMLResponse)
+def register_form(request: Request):
+    return _render_register_form(request)
+
+
+def _load_group_names() -> list[str]:
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT name FROM groups ORDER BY name")
+    groups = [row["name"] for row in cur.fetchall() if row["name"]]
+    conn.close()
+    return groups
+
+
+def _render_register_form(
+    request: Request,
+    error: str | None = None,
+    form_data: dict[str, str] | None = None,
+) -> HTMLResponse:
+    return render(
+        request,
+        "register.html",
+        {
+            "error": error,
+            "available_groups": _load_group_names(),
+            "form_data": form_data or {},
+        },
+    )
+
+
+@app.post("/register")
+def register(
+    request: Request,
+    role: str = Form("student"),
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+    student_group: str = Form(""),
+):
+    role = (role or "student").strip().lower()
+    form_state = {
+        "full_name": (full_name or "").strip(),
+        "login": (login or email or "").strip(),
+        "student_group": (student_group or "").strip(),
+    }
+    if role != "student":
+        return _render_register_form(request, "Самостоятельная регистрация доступна только студентам.", form_state)
+
+    clean_login = validate_login(form_state["login"])
+    if not clean_login:
+        return _render_register_form(
+            request,
+            "Некорректный логин. Используйте 3-80 символов без пробелов.",
+            form_state,
+        )
+
+    # --- Валидация пароля ---
+    pw_ok, pw_err = validate_password(password)
+    if not pw_ok:
+        return _render_register_form(request, pw_err, form_state)
+
+    # --- Санитизация имени ---
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        return _render_register_form(request, "Укажите ФИО.", form_state)
+
+    normalized_group = (student_group or "").strip()
+    if not normalized_group:
+        return _render_register_form(request, "Для студента необходимо выбрать группу.", form_state)
+
+    salt = new_salt()
+    password_hash = hash_password(password, salt)
+    conn = connect()
+    cur = conn.cursor()
+    assigned_teacher_id = find_group_teacher_id(cur, normalized_group)
+    try:
+        cur.execute(
+            "INSERT INTO users (role, full_name, email, password_hash, salt, student_group, assigned_teacher_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "student",
+                clean_name,
+                clean_login,
+                password_hash,
+                salt,
+                normalized_group,
+                assigned_teacher_id,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.close()
+        return _render_register_form(request, "Логин уже используется.", form_state)
+    conn.close()
+    return RedirectResponse("/login", status_code=302)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    next_path = request.query_params.get("next", "")
+    login_value = request.query_params.get("login", "")
+    return render(request, "login.html", {"error": None, "next": next_path, "login": login_value})
+
+
+@app.post("/login")
+def login(
+    request: Request,
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+    next: str = Form(""),
+):
+    # normalize login
+    raw_login = (login or email or "").strip()
+    clean_login = validate_login(raw_login)
+    if not clean_login:
+        return render(
+            request,
+            "login.html",
+            {"error": "Укажите корректный логин.", "next": next, "login": raw_login},
+        )
+
+    # --- Rate-limit по IP ---
+    client_ip = request.client.host if request.client else "unknown"
+    if login_limiter.is_blocked(client_ip):
+        wait = login_limiter.remaining_seconds(client_ip)
+        return render(request, "login.html", {
+            "error": f"Слишком много попыток входа. Подождите {wait} сек.",
+            "next": next,
+            "login": raw_login,
+        })
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE email = ?", (clean_login,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        login_limiter.record(client_ip)
+        return render(
+            request,
+            "login.html",
+            {"error": "Неверный логин или пароль.", "next": next, "login": raw_login},
+        )
+    if not verify_password(password, row["salt"], row["password_hash"]):
+        login_limiter.record(client_ip)
+        return render(
+            request,
+            "login.html",
+            {"error": "Неверный логин или пароль.", "next": next, "login": raw_login},
+        )
+
+    if row["role"] not in {"student", "teacher", "admin"}:
+        return render(
+            request,
+            "login.html",
+            {"error": "Для этой учетной записи вход отключен.", "next": next, "login": raw_login},
+        )
+
+    # Сброс rate-limiter при успехе
+    login_limiter.reset(client_ip)
+
+    # Автоматический rehash (миграция SHA-256 → PBKDF2)
+    if needs_rehash(row["password_hash"]):
+        new_s = new_salt()
+        new_h = hash_password(password, new_s)
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (new_h, new_s, row["id"]))
+        conn.commit()
+        conn.close()
+
+    # update last_login
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.utcnow().isoformat(), row["id"]))
+    conn.commit()
+    conn.close()
+    request.session["user_id"] = row["id"]
+    request.session["user_email"] = row["email"]
+    if row["role"] == "admin":
+        request.session["admin_authenticated"] = True
+        request.session["admin_email"] = row["email"]
+        resp = RedirectResponse("/admin/students", status_code=302)
+        resp.set_cookie("start_session", "admin", httponly=True, samesite="lax")
+        return resp
+    if row["role"] == "teacher" and (not next or next == ""):
+        resp = RedirectResponse("/v2/teacher", status_code=302)
+        resp.set_cookie("start_session", "teacher", httponly=True, samesite="lax")
+        return resp
+    # redirect to requested path if safe
+    redirect_to = "/dashboard"
+    if next and isinstance(next, str) and next.startswith("/"):
+        redirect_to = next
+    resp = RedirectResponse(redirect_to, status_code=302)
+    resp.set_cookie("start_session", row["role"], httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    resp = RedirectResponse("/", status_code=302)
+    resp.delete_cookie("start_session")
+    return resp
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+
+    context: dict[str, Any] = {}
+    if user["role"] == "student":
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT attempts.id AS attempt_id, attempts.score, attempts.taken_at, tests.title AS test_title
+            FROM attempts
+            JOIN tests ON tests.id = attempts.test_id
+            WHERE attempts.student_id = ?
+            ORDER BY attempts.taken_at DESC
+            LIMIT 10
+            """,
+            (user["id"],),
+        )
+        history = [dict(row) for row in cur.fetchall()]
+
+        disciplines: list[dict[str, Any]] = []
+        if user.get("assigned_teacher_id"):
+            cur.execute(
+                """
+                SELECT d.id, d.name, u.full_name AS teacher_name
+                FROM teacher_disciplines td
+                JOIN disciplines d ON d.id = td.discipline_id
+                JOIN users u ON u.id = td.teacher_id
+                WHERE td.teacher_id = ? AND u.role = 'teacher'
+                ORDER BY d.name
+                """,
+                (user["assigned_teacher_id"],),
+            )
+            disciplines = [dict(row) for row in cur.fetchall()]
+
+        conn.close()
+        context["testing_history"] = history
+        context["student_disciplines"] = disciplines
+
+    if user["role"] == "teacher":
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS cnt FROM lectures WHERE teacher_id = ?", (user["id"],))
+        lecture_total = int(cur.fetchone()["cnt"])
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.teacher_id = ?
+            """,
+            (user["id"],),
+        )
+        test_total = int(cur.fetchone()["cnt"])
+
+        cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'student' AND assigned_teacher_id = ?", (user["id"],))
+        student_total = int(cur.fetchone()["cnt"])
+
+        cur.execute(
+            """
+            SELECT AVG(attempts.score) AS avg_score
+            FROM attempts
+            JOIN tests ON tests.id = attempts.test_id
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.teacher_id = ?
+            """,
+            (user["id"],),
+        )
+        avg_row = cur.fetchone()
+        average_score = round(float(avg_row["avg_score"]), 2) if avg_row and avg_row["avg_score"] is not None else 0.0
+
+        conn.close()
+        context["teacher_summary"] = {
+            "lecture_total": lecture_total,
+            "test_total": test_total,
+            "student_total": student_total,
+            "average_score": average_score,
+        }
+
+    return render(request, "dashboard.html", context)
+
+
+@app.get("/teacher/lectures", response_class=HTMLResponse)
+def teacher_lectures(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    disciplines = get_discipline_map(cur)
+    # teacher sees own lectures; admin sees all
+    if user["role"] == "teacher":
+        cur.execute("SELECT * FROM lectures WHERE teacher_id = ? ORDER BY id DESC", (user["id"],))
+    else:
+        cur.execute("SELECT * FROM lectures ORDER BY id DESC")
+    lectures = []
+    for row in cur.fetchall():
+        lecture = dict(row)
+        lecture["discipline_name"] = disciplines.get(int(lecture.get("discipline_id") or 0), "Без дисциплины")
+        lectures.append(lecture)
+    conn.close()
+    return render(request, "teacher_lectures.html", {"lectures": lectures})
+
+
+@app.get("/teacher/lectures/new", response_class=HTMLResponse)
+def new_lecture_form(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, full_name FROM users WHERE role = 'teacher' ORDER BY full_name")
+    teachers = [dict(r) for r in cur.fetchall()]
+    disciplines = get_discipline_map(cur)
+
+    selected_discipline_id = None
+    teacher_discipline_options: list[dict[str, Any]] = []
+    if user.get("role") == "teacher":
+        teacher_discipline_options = get_teacher_disciplines(cur, user.get("id"))
+        if teacher_discipline_options:
+            selected_discipline_id = int(teacher_discipline_options[0]["id"])
+    elif user.get("role") == "admin" and teachers:
+        teacher_discipline_options = get_teacher_disciplines(cur, int(teachers[0]["id"]))
+        if teacher_discipline_options:
+            selected_discipline_id = int(teacher_discipline_options[0]["id"])
+
+    conn.close()
+    return render(
+        request,
+        "lecture_new.html",
+        {
+            "error": None,
+            "teachers": teachers,
+            "disciplines": disciplines,
+            "teacher_discipline_options": teacher_discipline_options,
+            "selected_discipline_id": selected_discipline_id,
+        },
+    )
+
+
+@app.get("/lecture/new")
+def lecture_new_legacy_redirect():
+    return RedirectResponse("/teacher/lectures/new", status_code=302)
+
+
+@app.get("/lectures/new")
+def lectures_new_legacy_redirect():
+    return RedirectResponse("/teacher/lectures/new", status_code=302)
+
+
+@app.post("/teacher/lectures/new")
+async def new_lecture(
+    request: Request,
+    title: str = Form(...),
+    body: str = Form(""),
+    source_urls: str = Form(""),
+    discipline_id: str = Form(""),
+    lecture_file: Optional[UploadFile] = File(None),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, full_name FROM users WHERE role = 'teacher' ORDER BY full_name")
+    teachers = [dict(r) for r in cur.fetchall()]
+    disciplines = get_discipline_map(cur)
+    teacher_discipline_options = get_teacher_disciplines(cur, user.get("id")) if user.get("role") == "teacher" else []
+    conn.close()
+
+    body_text = body.strip()
+    imported_parts: list[str] = []
+
+    if body_text:
+        imported_parts.append(body_text)
+
+    saved_filename: str | None = None
+    if lecture_file and (lecture_file.filename or "").strip():
+        try:
+            # Читаем файл и извлекаем текст в отдельном потоке, чтобы не блокировать сервер
+            raw_bytes = await lecture_file.read()
+            original_name = lecture_file.filename or "file"
+
+            loop = asyncio.get_event_loop()
+            file_text = await loop.run_in_executor(
+                None, lambda: _extract_text_from_bytes(raw_bytes, original_name)
+            )
+
+            # Сохраняем оригинальный файл для скачивания
+            ext = Path(original_name).suffix.lower()
+            unique_name = f"{uuid.uuid4().hex}{ext}"
+            (UPLOADS_DIR / unique_name).write_bytes(raw_bytes)
+            saved_filename = unique_name
+        except LectureImportError as exc:
+            return render(
+                request,
+                "lecture_new.html",
+                {
+                    "error": str(exc),
+                    "teachers": teachers,
+                    "disciplines": disciplines,
+                    "teacher_discipline_options": teacher_discipline_options,
+                    "selected_discipline_id": None,
+                },
+            )
+        imported_parts.append(file_text)
+
+    urls_text = source_urls.strip()
+    if urls_text:
+        try:
+            urls = parse_source_urls(urls_text)
+            url_body = extract_text_from_urls(urls)
+        except LectureImportError as exc:
+            return render(
+                request,
+                "lecture_new.html",
+                {
+                    "error": str(exc),
+                    "teachers": teachers,
+                    "disciplines": disciplines,
+                    "teacher_discipline_options": teacher_discipline_options,
+                    "selected_discipline_id": None,
+                },
+            )
+        imported_parts.append(url_body)
+
+    body_text = "\n\n".join(part.strip() for part in imported_parts if part.strip()).strip()
+
+    if len(body_text) < 20:
+        return render(
+            request,
+            "lecture_new.html",
+            {
+                "error": "Текст лекции слишком короткий (минимум 20 символов).",
+                "teachers": teachers,
+                "disciplines": disciplines,
+                "teacher_discipline_options": teacher_discipline_options,
+                "selected_discipline_id": None,
+            },
+        )
+    # determine teacher_id: if admin provided selection, use it; otherwise use current user id
+    teacher_id = user["id"]
+    if user["role"] == "admin":
+        form = await request.form()
+        sel = form.get("teacher_id")
+        try:
+            if sel:
+                teacher_id = int(sel)
+        except Exception:
+            teacher_id = user["id"]
+
+    conn = connect()
+    cur = conn.cursor()
+    teacher_discipline_ids = get_teacher_discipline_ids(cur, teacher_id)
+    selected_discipline_id = None
+    if discipline_id:
+        try:
+            selected_discipline_id = int(discipline_id)
+        except Exception:
+            selected_discipline_id = None
+
+    if selected_discipline_id is None and teacher_discipline_ids:
+        selected_discipline_id = int(teacher_discipline_ids[0])
+    if selected_discipline_id and teacher_discipline_ids and selected_discipline_id not in teacher_discipline_ids:
+        selected_discipline_id = int(teacher_discipline_ids[0]) if teacher_discipline_ids else selected_discipline_id
+
+    cur.execute(
+        "INSERT INTO lectures (teacher_id, title, body, created_at, discipline_id, original_filename) VALUES (?, ?, ?, ?, ?, ?)",
+        (teacher_id, title.strip(), body_text, datetime.utcnow().isoformat(), selected_discipline_id, saved_filename),
+    )
+    conn.commit()
+    conn.close()
+    return RedirectResponse("/teacher/lectures", status_code=302)
+
+
+@app.get("/teacher/lectures/{lecture_id}/download")
+def download_lecture_file(request: Request, lecture_id: int):
+    """Скачать оригинальный файл лекции."""
+    user = get_current_user(request)
+    if not user or user["role"] not in ("teacher", "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM lectures WHERE id = ?", (lecture_id,))
+    lecture = cur.fetchone()
+    conn.close()
+    if not lecture:
+        return RedirectResponse("/teacher/lectures", status_code=302)
+    fname = lecture["original_filename"] if "original_filename" in lecture.keys() else None
+    if not fname:
+        return HTMLResponse("Оригинальный файл не найден.", status_code=404)
+    file_path = UPLOADS_DIR / fname
+    if not file_path.exists():
+        return HTMLResponse("Файл был удалён с сервера.", status_code=404)
+    # Определяем имя для скачивания на основе названия лекции
+    ext = Path(fname).suffix
+    download_name = f"{lecture['title']}{ext}"
+    return FileResponse(
+        path=str(file_path),
+        filename=download_name,
+        media_type="application/octet-stream",
+    )
+
+
+@app.post("/teacher/lectures/import-urls")
+async def import_lecture_urls(request: Request, source_urls: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return JSONResponse({"ok": False, "error": "Требуется авторизация преподавателя."}, status_code=403)
+
+    raw_urls = (source_urls or "").strip()
+    if not raw_urls:
+        return JSONResponse({"ok": False, "error": "Добавьте хотя бы одну ссылку."}, status_code=400)
+
+    try:
+        urls = parse_source_urls(raw_urls)
+        imported_text = extract_text_from_urls(urls)
+    except LectureImportError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "text": imported_text,
+            "url_count": len(urls),
+            "char_count": len(imported_text),
+        }
+    )
+
+
+@app.post("/teacher/lectures/{lecture_id}/delete")
+def delete_lecture(request: Request, lecture_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+
+    if user["role"] == "teacher":
+        cur.execute("SELECT id FROM lectures WHERE id = ? AND teacher_id = ?", (lecture_id, user["id"]))
+    else:
+        cur.execute("SELECT id FROM lectures WHERE id = ?", (lecture_id,))
+
+    lecture = cur.fetchone()
+    if not lecture:
+        conn.close()
+        add_flash(request, "Лекция не найдена или нет доступа", "error")
+        return RedirectResponse("/teacher/lectures", status_code=302)
+
+    cur.execute("SELECT id FROM tests WHERE lecture_id = ?", (lecture_id,))
+    test_ids = [row["id"] for row in cur.fetchall()]
+
+    for test_id in test_ids:
+        cur.execute("DELETE FROM answers WHERE attempt_id IN (SELECT id FROM attempts WHERE test_id = ?)", (test_id,))
+        cur.execute("DELETE FROM attempts WHERE test_id = ?", (test_id,))
+        cur.execute("DELETE FROM questions WHERE test_id = ?", (test_id,))
+        cur.execute("DELETE FROM tests WHERE id = ?", (test_id,))
+
+    cur.execute("DELETE FROM lectures WHERE id = ?", (lecture_id,))
+    conn.commit()
+    conn.close()
+
+    audit_log(request, "delete_lecture", target_user_id=None, details=f"lecture_id={lecture_id}")
+    add_flash(request, "Лекция удалена", "success")
+    return RedirectResponse("/teacher/lectures", status_code=302)
+
+
+@app.get("/teacher/lectures/{lecture_id}", response_class=HTMLResponse)
+def lecture_detail(request: Request, lecture_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute("SELECT * FROM lectures WHERE id = ? AND teacher_id = ?", (lecture_id, user["id"]))
+    else:
+        cur.execute("SELECT * FROM lectures WHERE id = ?", (lecture_id,))
+    lecture = cur.fetchone()
+    if not lecture:
+        conn.close()
+        return RedirectResponse("/teacher/lectures", status_code=302)
+    cur.execute("SELECT * FROM tests WHERE lecture_id = ? ORDER BY id DESC", (lecture_id,))
+    tests = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return render(request, "lecture_detail.html", {"lecture": dict(lecture), "tests": tests})
+
+
+@app.post("/teacher/lectures/{lecture_id}/generate")
+def generate_test(
+    request: Request,
+    lecture_id: int,
+    question_count: int = Form(5),
+    difficulty: str = Form("medium"),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute("SELECT * FROM lectures WHERE id = ? AND teacher_id = ?", (lecture_id, user["id"]))
+    else:
+        cur.execute("SELECT * FROM lectures WHERE id = ?", (lecture_id,))
+    lecture = cur.fetchone()
+    if not lecture:
+        conn.close()
+        return RedirectResponse("/teacher/lectures", status_code=302)
+
+    count = max(1, min(int(question_count), 50))
+    difficulty = (difficulty or "medium").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+
+    is_ajax = request.headers.get("x-requested-with", "").lower() == "xmlhttprequest"
+
+    discipline_name = None
+    discipline_id_raw = lecture["discipline_id"] if "discipline_id" in lecture.keys() else None
+    try:
+        discipline_id = int(discipline_id_raw) if discipline_id_raw else None
+    except Exception:
+        discipline_id = None
+    if discipline_id:
+        cur.execute("SELECT name FROM disciplines WHERE id = ?", (discipline_id,))
+        discipline_row = cur.fetchone()
+        if discipline_row:
+            discipline_name = discipline_row["name"]
+
+    questions = generate_questions(
+        lecture["body"],
+        count=count,
+        difficulty=difficulty,
+        discipline_name=discipline_name,
+    )
+    if not questions:
+        conn.close()
+        details = diagnose_ai_setup()
+        message = f"[AI-DIAG-V2] AI не вернул качественные вопросы. {details}"
+        if is_ajax:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "message": message,
+                },
+                status_code=422,
+            )
+        add_flash(
+            request,
+            message,
+            "error",
+        )
+        return RedirectResponse(f"/teacher/lectures/{lecture_id}", status_code=302)
+
+    test_title = f"Тест по теме: {lecture['title']} ({difficulty}, {count} вопр.)"
+    cur.execute(
+        "INSERT INTO tests (lecture_id, title, status, created_at) VALUES (?, ?, ?, ?)",
+        (lecture_id, test_title, "draft", datetime.utcnow().isoformat()),
+    )
+    test_id = cur.lastrowid
+
+    for q in questions:
+        cur.execute(
+            "INSERT INTO questions (test_id, text, options_json, correct_index) VALUES (?, ?, ?, ?)",
+            (test_id, q["text"], json.dumps(q["options"], ensure_ascii=False), q["correct_index"]),
+        )
+    conn.commit()
+    conn.close()
+    if is_ajax:
+        return JSONResponse({"ok": True, "redirect": f"/teacher/tests/{test_id}/edit"})
+    return RedirectResponse(f"/teacher/tests/{test_id}/edit", status_code=302)
+
+
+@app.get("/teacher/tests/{test_id}/edit", response_class=HTMLResponse)
+def edit_test_form(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            SELECT tests.* FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE tests.id = ? AND lectures.teacher_id = ?
+            """,
+            (test_id, user["id"]),
+        )
+    else:
+        cur.execute("SELECT tests.* FROM tests WHERE tests.id = ?", (test_id,))
+    test = cur.fetchone()
+    if not test:
+        conn.close()
+        return RedirectResponse("/teacher/lectures", status_code=302)
+    cur.execute("SELECT * FROM questions WHERE test_id = ? ORDER BY id", (test_id,))
+    questions = []
+    for q in cur.fetchall():
+        questions.append({**dict(q), "options": json.loads(q["options_json"])})
+    conn.close()
+    return render(request, "test_edit.html", {"test": dict(test), "questions": questions})
+
+
+@app.post("/teacher/tests/{test_id}/edit")
+async def edit_test_submit(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    form = await request.form()
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            SELECT tests.* FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE tests.id = ? AND lectures.teacher_id = ?
+            """,
+            (test_id, user["id"]),
+        )
+    else:
+        cur.execute("SELECT tests.* FROM tests WHERE tests.id = ?", (test_id,))
+    test = cur.fetchone()
+    if not test:
+        conn.close()
+        return RedirectResponse("/teacher/lectures", status_code=302)
+
+    cur.execute("SELECT id FROM questions WHERE test_id = ? ORDER BY id", (test_id,))
+    question_ids = [r["id"] for r in cur.fetchall()]
+
+    for qid in question_ids:
+        text = form.get(f"q_{qid}_text", "").strip()
+        options = [
+            form.get(f"q_{qid}_opt_0", "").strip(),
+            form.get(f"q_{qid}_opt_1", "").strip(),
+            form.get(f"q_{qid}_opt_2", "").strip(),
+            form.get(f"q_{qid}_opt_3", "").strip(),
+        ]
+        try:
+            correct_index = int(form.get(f"q_{qid}_correct", "0"))
+        except ValueError:
+            correct_index = 0
+        cur.execute(
+            "UPDATE questions SET text = ?, options_json = ?, correct_index = ? WHERE id = ?",
+            (text, json.dumps(options, ensure_ascii=False), correct_index, qid),
+        )
+    conn.commit()
+    conn.close()
+    return RedirectResponse(f"/teacher/tests/{test_id}/edit", status_code=302)
+
+
+@app.post("/teacher/tests/{test_id}/publish")
+def publish_test(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            UPDATE tests SET status = 'published'
+            WHERE id = ? AND lecture_id IN (SELECT id FROM lectures WHERE teacher_id = ?)
+            """,
+            (test_id, user["id"]),
+        )
+    else:
+        cur.execute("UPDATE tests SET status = 'published' WHERE id = ?", (test_id,))
+    conn.commit()
+    conn.close()
+    return RedirectResponse("/teacher/lectures", status_code=302)
+
+
+@app.post("/teacher/tests/{test_id}/delete")
+def delete_test(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            SELECT tests.id
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE tests.id = ? AND lectures.teacher_id = ?
+            """,
+            (test_id, user["id"]),
+        )
+    else:
+        cur.execute("SELECT id FROM tests WHERE id = ?", (test_id,))
+
+    exists = cur.fetchone()
+    if not exists:
+        conn.close()
+        add_flash(request, "Тест не найден или нет доступа", "error")
+        return RedirectResponse("/v2/teacher/tests", status_code=302)
+
+    cur.execute(
+        "DELETE FROM answers WHERE attempt_id IN (SELECT id FROM attempts WHERE test_id = ?)",
+        (test_id,),
+    )
+    cur.execute("DELETE FROM attempts WHERE test_id = ?", (test_id,))
+    cur.execute("DELETE FROM questions WHERE test_id = ?", (test_id,))
+    cur.execute("DELETE FROM tests WHERE id = ?", (test_id,))
+    conn.commit()
+    conn.close()
+
+    audit_log(request, "delete_test", target_user_id=None, details=f"test_id={test_id}")
+    add_flash(request, "Тест удалён", "success")
+    return RedirectResponse("/v2/teacher/tests", status_code=302)
+
+
+@app.get("/teacher/tests/{test_id}/qr", response_class=HTMLResponse)
+def teacher_test_qr(request: Request, test_id: int):
+    user = get_current_user(request)
+    if not user or (user["role"] != "teacher" and user["role"] != "admin"):
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            SELECT tests.id, tests.title, tests.status, lectures.title AS lecture_title
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE tests.id = ? AND lectures.teacher_id = ?
+            """,
+            (test_id, user["id"]),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT tests.id, tests.title, tests.status, lectures.title AS lecture_title
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE tests.id = ?
+            """,
+            (test_id,),
+        )
+
+    test = cur.fetchone()
+    conn.close()
+    if not test:
+        add_flash(request, "Тест не найден или нет доступа", "error")
+        return RedirectResponse("/v2/teacher/tests", status_code=302)
+
+    entry_path = f"/student/tests/{test_id}/entry"
+    entry_url = f"{str(request.base_url).rstrip('/')}{entry_path}"
+    qr_image_url = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + quote_plus(entry_url)
+
+    return render(
+        request,
+        "test_qr.html",
+        {
+            "test": dict(test),
+            "entry_url": entry_url,
+            "qr_image_url": qr_image_url,
+            "entry_path": entry_path,
+        },
+    )
+
+
+@app.get("/student/tests/{test_id}/entry")
+def student_test_entry(request: Request, test_id: int):
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM tests WHERE id = ? AND status = 'published'", (test_id,))
+    test = cur.fetchone()
+    conn.close()
+
+    if not test:
+        add_flash(request, "Тест недоступен по этой ссылке.", "error")
+        return RedirectResponse("/", status_code=302)
+
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(f"/login?next=/student/tests/{test_id}/take", status_code=302)
+
+    if user.get("role") != "student":
+        add_flash(request, "Прохождение тестов доступно только для студентов.", "error")
+        return RedirectResponse("/dashboard", status_code=302)
+
+    return RedirectResponse(f"/student/tests/{test_id}/take", status_code=302)
+
+
+@app.get("/student/tests", response_class=HTMLResponse)
+def student_tests(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    discipline_filter_raw = request.query_params.get("discipline_id", "")
+    discipline_filter: int | None = None
+    try:
+        if discipline_filter_raw:
+            discipline_filter = int(discipline_filter_raw)
+    except Exception:
+        discipline_filter = None
+
+    cur.execute("SELECT id, name FROM disciplines ORDER BY name")
+    all_disciplines = [dict(row) for row in cur.fetchall()]
+
+    student_disciplines: list[dict[str, Any]] = []
+    if user.get("assigned_teacher_id"):
+        cur.execute(
+            """
+            SELECT d.id, d.name, u.full_name AS teacher_name
+            FROM teacher_disciplines td
+            JOIN disciplines d ON d.id = td.discipline_id
+            JOIN users u ON u.id = td.teacher_id
+            WHERE td.teacher_id = ? AND u.role = 'teacher'
+            ORDER BY d.name
+            """,
+            (user.get("assigned_teacher_id"),),
+        )
+        student_disciplines = [dict(row) for row in cur.fetchall()]
+
+    # students should see only tests from their assigned teacher (if assigned)
+    if user.get("assigned_teacher_id"):
+        if discipline_filter:
+            cur.execute(
+                """
+                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
+                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
+                FROM tests
+                JOIN lectures ON lectures.id = tests.lecture_id
+                LEFT JOIN attempts a ON a.id = (
+                    SELECT MAX(ax.id)
+                    FROM attempts ax
+                    WHERE ax.test_id = tests.id AND ax.student_id = ?
+                )
+                WHERE tests.status = 'published' AND lectures.teacher_id = ? AND lectures.discipline_id = ?
+                ORDER BY tests.id DESC
+                """,
+                (user["id"], user.get("assigned_teacher_id"), discipline_filter),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
+                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
+                FROM tests
+                JOIN lectures ON lectures.id = tests.lecture_id
+                LEFT JOIN attempts a ON a.id = (
+                    SELECT MAX(ax.id)
+                    FROM attempts ax
+                    WHERE ax.test_id = tests.id AND ax.student_id = ?
+                )
+                WHERE tests.status = 'published' AND lectures.teacher_id = ?
+                ORDER BY tests.id DESC
+                """,
+                (user["id"], user.get("assigned_teacher_id")),
+            )
+    else:
+        if discipline_filter:
+            cur.execute(
+                """
+                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
+                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
+                FROM tests
+                JOIN lectures ON lectures.id = tests.lecture_id
+                LEFT JOIN attempts a ON a.id = (
+                    SELECT MAX(ax.id)
+                    FROM attempts ax
+                    WHERE ax.test_id = tests.id AND ax.student_id = ?
+                )
+                WHERE tests.status = 'published' AND lectures.discipline_id = ?
+                ORDER BY tests.id DESC
+                """,
+                (user["id"], discipline_filter),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
+                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
+                FROM tests
+                JOIN lectures ON lectures.id = tests.lecture_id
+                LEFT JOIN attempts a ON a.id = (
+                    SELECT MAX(ax.id)
+                    FROM attempts ax
+                    WHERE ax.test_id = tests.id AND ax.student_id = ?
+                )
+                WHERE tests.status = 'published'
+                ORDER BY tests.id DESC
+                """,
+                (user["id"],),
+            )
+    tests = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    discipline_name_by_id = {int(d["id"]): d["name"] for d in all_disciplines}
+    for item in tests:
+        item["discipline_name"] = discipline_name_by_id.get(int(item.get("discipline_id") or 0), "Без дисциплины")
+        item["is_completed"] = bool(item.get("attempt_id"))
+
+    return render(
+        request,
+        "student_tests.html",
+        {
+            "tests": tests,
+            "student_disciplines": student_disciplines,
+            "selected_discipline_id": discipline_filter,
+        },
+    )
+
+
+@app.get("/student/tests/{test_id}/take", response_class=HTMLResponse)
+def take_test_form(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tests WHERE id = ? AND status = 'published'", (test_id,))
+    test = cur.fetchone()
+    if not test:
+        conn.close()
+        return RedirectResponse("/student/tests", status_code=302)
+
+    cur.execute(
+        "SELECT id FROM attempts WHERE test_id = ? AND student_id = ? LIMIT 1",
+        (test_id, user["id"]),
+    )
+    existing_attempt = cur.fetchone()
+    if existing_attempt:
+        conn.close()
+        add_flash(request, "Этот тест уже пройден. Повторное прохождение недоступно.", "info")
+        return RedirectResponse(f"/student/attempts/{int(existing_attempt['id'])}", status_code=302)
+
+    cur.execute("SELECT * FROM questions WHERE test_id = ? ORDER BY id", (test_id,))
+    questions = []
+    for q in cur.fetchall():
+        questions.append({**dict(q), "options": json.loads(q["options_json"])})
+    conn.close()
+    return render(request, "test_take.html", {"test": dict(test), "questions": questions})
+
+
+@app.post("/student/tests/{test_id}/take")
+async def take_test_submit(request: Request, test_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login", status_code=302)
+    form = await request.form()
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tests WHERE id = ? AND status = 'published'", (test_id,))
+    test = cur.fetchone()
+    if not test:
+        conn.close()
+        return RedirectResponse("/student/tests", status_code=302)
+
+    cur.execute(
+        "SELECT id FROM attempts WHERE test_id = ? AND student_id = ? LIMIT 1",
+        (test_id, user["id"]),
+    )
+    existing_attempt = cur.fetchone()
+    if existing_attempt:
+        conn.close()
+        add_flash(request, "Этот тест уже пройден. Повторное прохождение недоступно.", "info")
+        return RedirectResponse(f"/student/attempts/{int(existing_attempt['id'])}", status_code=302)
+
+    cur.execute("SELECT * FROM questions WHERE test_id = ? ORDER BY id", (test_id,))
+    questions = [dict(r) for r in cur.fetchall()]
+
+    correct = 0
+    for q in questions:
+        selected = int(form.get(f"q_{q['id']}", "-1"))
+        if selected == q["correct_index"]:
+            correct += 1
+    score = round(100 * correct / max(1, len(questions)), 2)
+
+    cur.execute(
+        "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+        (test_id, user["id"], score, datetime.utcnow().isoformat()),
+    )
+    attempt_id = cur.lastrowid
+    for q in questions:
+        selected = int(form.get(f"q_{q['id']}", "-1"))
+        is_correct = 1 if selected == q["correct_index"] else 0
+        cur.execute(
+            "INSERT INTO answers (attempt_id, question_id, selected_index, is_correct) VALUES (?, ?, ?, ?)",
+            (attempt_id, q["id"], selected, is_correct),
+        )
+    conn.commit()
+    conn.close()
+    return RedirectResponse(f"/student/attempts/{attempt_id}", status_code=302)
+
+
+@app.get("/student/attempts/{attempt_id}", response_class=HTMLResponse)
+def student_attempt_review(request: Request, attempt_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT attempts.id, attempts.score, attempts.taken_at, tests.title AS test_title
+        FROM attempts
+        JOIN tests ON tests.id = attempts.test_id
+        WHERE attempts.id = ? AND attempts.student_id = ?
+        """,
+        (attempt_id, user["id"]),
+    )
+    attempt = cur.fetchone()
+    if not attempt:
+        conn.close()
+        return RedirectResponse("/student/analytics", status_code=302)
+
+    cur.execute(
+        """
+        SELECT
+            q.id AS question_id,
+            q.text AS question_text,
+            q.options_json,
+            q.correct_index,
+            a.selected_index,
+            a.is_correct
+        FROM answers a
+        JOIN questions q ON q.id = a.question_id
+        WHERE a.attempt_id = ?
+        ORDER BY q.id
+        """,
+        (attempt_id,),
+    )
+    answer_rows = cur.fetchall()
+    conn.close()
+
+    review_items: list[dict[str, Any]] = []
+    correct_count = 0
+    for row in answer_rows:
+        options = json.loads(row["options_json"])
+        selected_index = int(row["selected_index"])
+        correct_index = int(row["correct_index"])
+
+        option_items = []
+        for index, text in enumerate(options):
+            option_items.append(
+                {
+                    "text": text,
+                    "is_selected": index == selected_index,
+                    "is_correct": index == correct_index,
+                    "is_wrong_selected": index == selected_index and index != correct_index,
+                }
+            )
+
+        is_correct = bool(row["is_correct"])
+        if is_correct:
+            correct_count += 1
+
+        review_items.append(
+            {
+                "question_text": row["question_text"],
+                "options": option_items,
+                "is_correct": is_correct,
+            }
+        )
+
+    total_questions = len(review_items)
+    wrong_count = max(0, total_questions - correct_count)
+    return render(
+        request,
+        "student_attempt_review.html",
+        {
+            "attempt": dict(attempt),
+            "review_items": review_items,
+            "correct_count": correct_count,
+            "wrong_count": wrong_count,
+            "total_questions": total_questions,
+        },
+    )
+
+
+@app.get("/student/analytics", response_class=HTMLResponse)
+def student_analytics(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT attempts.id AS attempt_id, attempts.score, attempts.taken_at, tests.id AS test_id, tests.title AS test_title
+        FROM attempts
+        JOIN tests ON tests.id = attempts.test_id
+        WHERE attempts.student_id = ?
+        ORDER BY attempts.taken_at DESC
+        """,
+        (user["id"],),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    scores = [r["score"] for r in rows]
+    avg = round(sum(scores) / len(scores), 2) if scores else 0.0
+    trend = 0.0
+    if len(scores) >= 2:
+        trend = round(scores[0] - scores[1], 2)
+    best = max(scores) if scores else 0.0
+    worst = min(scores) if scores else 0.0
+
+    last_7_days = 0.0
+    if rows:
+        cutoff = datetime.utcnow()
+        cutoff = cutoff.replace(microsecond=0)
+        recent_scores = []
+        for r in rows:
+            try:
+                taken_at = datetime.fromisoformat(r["taken_at"])
+            except Exception:
+                continue
+            if (cutoff - taken_at).days <= 7:
+                recent_scores.append(r["score"])
+        if recent_scores:
+            last_7_days = round(sum(recent_scores) / len(recent_scores), 2)
+
+    per_test_latest: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        test_id = int(r["test_id"])
+        if test_id not in per_test_latest:
+            per_test_latest[test_id] = {
+                "title": r["test_title"],
+                "score": r["score"],
+                "taken_at": r["taken_at"],
+                "attempt_id": r["attempt_id"],
+            }
+    per_test_list = list(per_test_latest.values())
+
+    recent = [
+        {
+            "score": r["score"],
+            "taken_at": r["taken_at"],
+            "test_title": r["test_title"],
+            "attempt_id": r["attempt_id"],
+        }
+        for r in rows[:5]
+    ]
+    spark_points = list(reversed(scores[:10]))
+    sparkline = make_sparkline(spark_points)
+    return render(
+        request,
+        "student_analytics.html",
+        {
+            "avg": avg,
+            "trend": trend,
+            "recent": recent,
+            "total": len(scores),
+            "best": best,
+            "worst": worst,
+            "last7": last_7_days,
+            "per_test": per_test_list,
+            "sparkline": sparkline,
+            "spark_points": spark_points,
+        },
+    )
+
+
+@app.get("/growth", response_class=HTMLResponse)
+def growth_module(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "student":
+        return RedirectResponse("/login?next=/growth", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            attempts.taken_at,
+            tests.title AS test_title,
+            q.text AS question_text,
+            q.options_json,
+            q.correct_index,
+            a.selected_index
+        FROM answers a
+        JOIN attempts ON attempts.id = a.attempt_id
+        JOIN questions q ON q.id = a.question_id
+        JOIN tests ON tests.id = attempts.test_id
+        WHERE attempts.student_id = ? AND a.is_correct = 0
+        ORDER BY attempts.taken_at DESC
+        LIMIT 120
+        """,
+        (user["id"],),
+    )
+    wrong_rows = cur.fetchall()
+    conn.close()
+
+    mistakes: list[dict[str, Any]] = []
+    context_blocks: list[str] = []
+    for row in wrong_rows:
+        options = json.loads(row["options_json"])
+        selected_index = int(row["selected_index"])
+        correct_index = int(row["correct_index"])
+
+        selected_text = "Без ответа"
+        if 0 <= selected_index < len(options):
+            selected_text = options[selected_index]
+
+        correct_text = ""
+        if 0 <= correct_index < len(options):
+            correct_text = options[correct_index]
+
+        mistake_item = {
+            "taken_at": row["taken_at"],
+            "test_title": row["test_title"],
+            "question_text": row["question_text"],
+            "selected_text": selected_text,
+            "correct_text": correct_text,
+        }
+        mistakes.append(mistake_item)
+
+        context_blocks.append(
+            "\n".join(
+                [
+                    f"Тест: {row['test_title']}",
+                    f"Вопрос: {row['question_text']}",
+                    f"Ответ студента: {selected_text}",
+                    f"Правильный ответ: {correct_text}",
+                ]
+            )
+        )
+
+    topics: list[dict[str, str]] = []
+    if context_blocks:
+        context = "\n\n".join(context_blocks)
+        generated = generate_growth_topics(context, limit=8)
+        topics = [
+            {
+                "topic": str(item.get("topic") or "").strip(),
+                "reason": str(item.get("reason") or "").strip(),
+                "query": str(item.get("query") or item.get("topic") or "").strip(),
+            }
+            for item in generated
+            if str(item.get("topic") or "").strip()
+        ]
+
+        for item in topics:
+            item["search_url"] = f"https://www.google.com/search?q={quote_plus(item['query'])}"
+
+    return render(
+        request,
+        "growth.html",
+        {
+            "topics": topics,
+            "mistakes_total": len(mistakes),
+            "mistakes_preview": mistakes[:10],
+        },
+    )
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users_redirect(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse("/admin/students", status_code=302)
+
+
+@app.get("/admin/students", response_class=HTMLResponse)
+def admin_students(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    q = request.query_params.get("q", "").strip()
+    conn = connect()
+    cur = conn.cursor()
+    users = fetch_users_by_role(cur, "student", q)
+    conn.close()
+    return render(request, "admin_users.html", {"users": users, "mode": "admin", "query": q, "page_kind": "students", "page_title": "Студенты"})
+
+
+@app.get("/admin/teachers", response_class=HTMLResponse)
+def admin_teachers(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    q = request.query_params.get("q", "").strip()
+    conn = connect()
+    cur = conn.cursor()
+    users = fetch_users_by_role(cur, "teacher", q)
+    conn.close()
+    return render(request, "admin_users.html", {"users": users, "mode": "admin", "query": q, "page_kind": "teachers", "page_title": "Преподаватели"})
+
+
+@app.get("/admin/groups", response_class=HTMLResponse)
+def admin_groups(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    selected_name = (request.query_params.get("group") or "").replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    context = build_groups_page_context(cur, selected_name if selected_name else None)
+    conn.close()
+    return render(request, "admin_groups.html", {"mode": "admin", **context})
+
+
+def build_disciplines_page_context(cur) -> dict[str, Any]:
+    cur.execute("SELECT id, name FROM disciplines ORDER BY name")
+    disciplines = [dict(row) for row in cur.fetchall()]
+
+    for discipline in disciplines:
+        discipline_id = int(discipline["id"])
+        cur.execute("SELECT COUNT(*) AS cnt FROM teacher_disciplines WHERE discipline_id = ?", (discipline_id,))
+        teacher_count = int(cur.fetchone()["cnt"])
+
+        cur.execute("SELECT COUNT(*) AS cnt FROM lectures WHERE discipline_id = ?", (discipline_id,))
+        lecture_count = int(cur.fetchone()["cnt"])
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.discipline_id = ?
+            """,
+            (discipline_id,),
+        )
+        test_count = int(cur.fetchone()["cnt"])
+
+        discipline["teacher_count"] = teacher_count
+        discipline["lecture_count"] = lecture_count
+        discipline["test_count"] = test_count
+
+    return {"disciplines": disciplines}
+
+
+def build_discipline_detail_context(cur, discipline_id: int) -> dict[str, Any] | None:
+    cur.execute("SELECT id, name FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    if not discipline:
+        return None
+
+    discipline_dict = dict(discipline)
+
+    cur.execute(
+        """
+        SELECT u.id, u.full_name, u.email
+        FROM teacher_disciplines td
+        JOIN users u ON u.id = td.teacher_id
+        WHERE td.discipline_id = ? AND u.role = 'teacher'
+        ORDER BY u.full_name
+        """,
+        (discipline_id,),
+    )
+    assigned_teachers = [dict(row) for row in cur.fetchall()]
+    assigned_ids = {int(row["id"]) for row in assigned_teachers}
+
+    cur.execute("SELECT id, full_name, email FROM users WHERE role = 'teacher' ORDER BY full_name")
+    all_teachers = [dict(row) for row in cur.fetchall()]
+    available_teachers = [t for t in all_teachers if int(t["id"]) not in assigned_ids]
+
+    cur.execute("SELECT COUNT(*) AS cnt FROM lectures WHERE discipline_id = ?", (discipline_id,))
+    lecture_count = int(cur.fetchone()["cnt"])
+
+    cur.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM tests
+        JOIN lectures ON lectures.id = tests.lecture_id
+        WHERE lectures.discipline_id = ?
+        """,
+        (discipline_id,),
+    )
+    test_count = int(cur.fetchone()["cnt"])
+
+    discipline_dict["lecture_count"] = lecture_count
+    discipline_dict["test_count"] = test_count
+
+    return {
+        "discipline": discipline_dict,
+        "assigned_teachers": assigned_teachers,
+        "available_teachers": available_teachers,
+    }
+
+
+@app.get("/admin/disciplines", response_class=HTMLResponse)
+def admin_disciplines(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    context = build_disciplines_page_context(cur)
+    conn.close()
+    return render(request, "admin_disciplines.html", {"mode": "admin", **context})
+
+
+@app.get("/v1/admin/disciplines", response_class=HTMLResponse)
+def v1_admin_disciplines(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    context = build_disciplines_page_context(cur)
+    conn.close()
+    return templates.TemplateResponse("admin_disciplines.html", {"request": request, "mode": "v1_admin", **context})
+
+
+@app.get("/admin/disciplines/{discipline_id}", response_class=HTMLResponse)
+def admin_discipline_detail(request: Request, discipline_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    context = build_discipline_detail_context(cur, discipline_id)
+    conn.close()
+    if not context:
+        add_flash(request, "Дисциплина не найдена", "error")
+        return RedirectResponse("/admin/disciplines", status_code=302)
+    return render(request, "admin_discipline_detail.html", {"mode": "admin", **context})
+
+
+@app.get("/v1/admin/disciplines/{discipline_id}", response_class=HTMLResponse)
+def v1_admin_discipline_detail(request: Request, discipline_id: int):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    context = build_discipline_detail_context(cur, discipline_id)
+    conn.close()
+    if not context:
+        add_flash(request, "Дисциплина не найдена", "error")
+        return RedirectResponse("/v1/admin/disciplines", status_code=302)
+    return templates.TemplateResponse("admin_discipline_detail.html", {"request": request, "mode": "v1_admin", **context})
+
+
+@app.post("/admin/disciplines/{discipline_id}/assign-teacher")
+def admin_assign_teacher_to_discipline(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_id,))
+    teacher = cur.fetchone()
+    if not discipline or not teacher:
+        conn.close()
+        add_flash(request, "Некорректная дисциплина или преподаватель", "error")
+        return RedirectResponse("/admin/disciplines", status_code=302)
+
+    cur.execute(
+        "SELECT 1 FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+    if cur.fetchone():
+        conn.close()
+        add_flash(request, "Преподаватель уже назначен", "info")
+        return RedirectResponse(f"/admin/disciplines/{discipline_id}", status_code=302)
+
+    cur.execute(
+        "INSERT INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+        (teacher_id, discipline_id),
+    )
+    conn.commit()
+    conn.close()
+    add_flash(request, "Преподаватель назначен", "success")
+    return RedirectResponse(f"/admin/disciplines/{discipline_id}", status_code=302)
+
+
+@app.post("/admin/disciplines/{discipline_id}/unassign-teacher")
+def admin_unassign_teacher_from_discipline(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+    conn.commit()
+    conn.close()
+    add_flash(request, "Преподаватель снят с дисциплины", "success")
+    return RedirectResponse(f"/admin/disciplines/{discipline_id}", status_code=302)
+
+
+@app.post("/v1/admin/disciplines/{discipline_id}/assign-teacher")
+def v1_admin_assign_teacher_to_discipline(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_id,))
+    teacher = cur.fetchone()
+    if not discipline or not teacher:
+        conn.close()
+        add_flash(request, "Некорректная дисциплина или преподаватель", "error")
+        return RedirectResponse("/v1/admin/disciplines", status_code=302)
+
+    cur.execute(
+        "SELECT 1 FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+    if cur.fetchone():
+        conn.close()
+        add_flash(request, "Преподаватель уже назначен", "info")
+        return RedirectResponse(f"/v1/admin/disciplines/{discipline_id}", status_code=302)
+
+    cur.execute(
+        "INSERT INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+        (teacher_id, discipline_id),
+    )
+    conn.commit()
+    conn.close()
+    add_flash(request, "Преподаватель назначен", "success")
+    return RedirectResponse(f"/v1/admin/disciplines/{discipline_id}", status_code=302)
+
+
+@app.post("/v1/admin/disciplines/{discipline_id}/unassign-teacher")
+def v1_admin_unassign_teacher_from_discipline(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+    conn.commit()
+    conn.close()
+    add_flash(request, "Преподаватель снят с дисциплины", "success")
+    return RedirectResponse(f"/v1/admin/disciplines/{discipline_id}", status_code=302)
+
+
+@app.get("/v1/admin/groups/{group_name}", response_class=HTMLResponse)
+def v1_admin_group(request: Request, group_name: str):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    context = build_groups_page_context(cur, name)
+    conn.close()
+    return templates.TemplateResponse("admin_groups.html", {"request": request, "mode": "v1_admin", **context})
+
+
+@app.get("/v1/admin/groups", response_class=HTMLResponse)
+def v1_admin_groups(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    selected_name = (request.query_params.get("group") or "").replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    context = build_groups_page_context(cur, selected_name if selected_name else None)
+    conn.close()
+    return templates.TemplateResponse("admin_groups.html", {"request": request, "mode": "v1_admin", **context})
+
+
+@app.get("/admin/groups/{group_name}", response_class=HTMLResponse)
+def admin_group(request: Request, group_name: str):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    context = build_groups_page_context(cur, name)
+    conn.close()
+    return render(request, "admin_groups.html", {"mode": "admin", **context})
+# --- Separate admin panel (v1) with its own simple auth ---
+def admin_panel_auth(request: Request) -> bool:
+    # require both admin session flag and start_session cookie
+    return bool(request.session.get("admin_authenticated") and request.cookies.get("start_session"))
+
+
+def ensure_start_session_cookie(request: Request) -> None:
+    from fastapi import HTTPException
+    if not request.cookies.get("start_session"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/v1/admin", response_class=HTMLResponse)
+def v1_admin_index(request: Request):
+    return RedirectResponse("/v2/admin", status_code=302)
+
+
+@app.post("/v1/admin/login")
+def v1_admin_login(
+    request: Request,
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+):
+    return RedirectResponse("/v2/admin", status_code=302)
+
+
+@app.get("/v2/admin", response_class=HTMLResponse)
+def v2_admin_index(request: Request):
+    user = get_current_user(request)
+    if user and user.get("role") == "admin":
+        return RedirectResponse("/admin/students", status_code=302)
+    return templates.TemplateResponse(
+        "admin_login.html",
+        {"request": request, "error": None, "login_action": "/v2/admin/login"},
+    )
+
+
+@app.get("/v2/admin/disciplines", response_class=HTMLResponse)
+def v2_admin_disciplines_alias(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse("/admin/disciplines", status_code=302)
+
+
+@app.post("/v2/admin/disciplines/create")
+def v2_admin_create_discipline_alias(request: Request, discipline_name: str = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return admin_create_discipline(request, discipline_name)
+
+
+@app.get("/v2/admin/disciplines/{discipline_id}", response_class=HTMLResponse)
+def v2_admin_discipline_detail_alias(request: Request, discipline_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse(f"/admin/disciplines/{discipline_id}", status_code=302)
+
+
+@app.post("/v2/admin/disciplines/{discipline_id}/assign-teacher")
+def v2_admin_assign_teacher_alias(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return admin_assign_teacher_to_discipline(request, discipline_id, teacher_id)
+
+
+@app.post("/v2/admin/disciplines/{discipline_id}/unassign-teacher")
+def v2_admin_unassign_teacher_alias(request: Request, discipline_id: int, teacher_id: int = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    return admin_unassign_teacher_from_discipline(request, discipline_id, teacher_id)
+
+
+@app.post("/v2/admin/login")
+def v2_admin_login(
+    request: Request,
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+):
+    raw_login = (login or email or "").strip()
+    clean_login = validate_login(raw_login)
+    if not clean_login:
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "error": "Укажите корректный логин.",
+                "login_action": "/v2/admin/login",
+                "login": raw_login,
+            },
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    if login_limiter.is_blocked(client_ip):
+        wait = login_limiter.remaining_seconds(client_ip)
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "error": f"Слишком много попыток. Подождите {wait} сек.",
+                "login_action": "/v2/admin/login",
+                "login": raw_login,
+            },
+        )
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE email = ?", (clean_login,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        login_limiter.record(client_ip)
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "error": "Неверный логин или пароль.",
+                "login_action": "/v2/admin/login",
+                "login": raw_login,
+            },
+        )
+    if not verify_password(password, row["salt"], row["password_hash"]):
+        login_limiter.record(client_ip)
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "error": "Неверный логин или пароль.",
+                "login_action": "/v2/admin/login",
+                "login": raw_login,
+            },
+        )
+    if row["role"] != "admin":
+        return templates.TemplateResponse(
+            "admin_login.html",
+            {
+                "request": request,
+                "error": "Учетная запись не является админом.",
+                "login_action": "/v2/admin/login",
+                "login": raw_login,
+            },
+        )
+    login_limiter.reset(client_ip)
+    # rehash if legacy
+    if needs_rehash(row["password_hash"]):
+        s = new_salt()
+        h = hash_password(password, s)
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, row["id"]))
+        conn.commit()
+        conn.close()
+    request.session["user_id"] = row["id"]
+    request.session["admin_authenticated"] = True
+    request.session["admin_email"] = row["email"]
+    resp = RedirectResponse("/admin/students", status_code=302)
+    resp.set_cookie("start_session", "admin", httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/v1/admin/logout")
+def v1_admin_logout(request: Request):
+    request.session.pop("user_id", None)
+    request.session.pop("admin_authenticated", None)
+    request.session.pop("admin_email", None)
+    resp = RedirectResponse("/v2/admin", status_code=302)
+    resp.delete_cookie("start_session")
+    return resp
+
+
+@app.get("/v1/admin/dashboard", response_class=HTMLResponse)
+def v1_admin_dashboard(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    return templates.TemplateResponse("admin_dashboard.html", {"request": request})
+
+
+@app.get("/v1/admin/users", response_class=HTMLResponse)
+def v1_admin_users_redirect(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    return RedirectResponse("/v1/admin/students", status_code=302)
+
+
+@app.get("/v1/admin/students", response_class=HTMLResponse)
+def v1_admin_students(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    q = request.query_params.get("q", "").strip()
+    conn = connect()
+    cur = conn.cursor()
+    users = fetch_users_by_role(cur, "student", q)
+    conn.close()
+    return templates.TemplateResponse("admin_users.html", {"request": request, "users": users, "mode": "v1_admin", "query": q, "page_kind": "students", "page_title": "Студенты"})
+
+
+@app.get("/v1/admin/teachers", response_class=HTMLResponse)
+def v1_admin_teachers(request: Request):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    q = request.query_params.get("q", "").strip()
+    conn = connect()
+    cur = conn.cursor()
+    users = fetch_users_by_role(cur, "teacher", q)
+    conn.close()
+    return templates.TemplateResponse("admin_users.html", {"request": request, "users": users, "mode": "v1_admin", "query": q, "page_kind": "teachers", "page_title": "Преподаватели"})
+
+
+@app.post("/v1/admin/groups/create")
+def v1_admin_create_group(request: Request, group_name: str = Form(...), teacher_id: str = Form("")):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    normalized_name = (group_name or "").strip()
+    if not normalized_name:
+        add_flash(request, "Название группы обязательно", "error")
+        return RedirectResponse("/v1/admin/groups", status_code=302)
+    if not teacher_id:
+        add_flash(request, "Для группы нужно выбрать преподавателя", "error")
+        return RedirectResponse("/v1/admin/groups", status_code=302)
+    assigned_teacher = None
+    if teacher_id:
+        try:
+            assigned_teacher = int(teacher_id)
+        except ValueError:
+            assigned_teacher = None
+    if not assigned_teacher:
+        add_flash(request, "Некорректный преподаватель", "error")
+        return RedirectResponse("/v1/admin/groups", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (assigned_teacher,))
+        if not cur.fetchone():
+            conn.close()
+            add_flash(request, "Выбранный преподаватель не найден", "error")
+            return RedirectResponse("/v1/admin/groups", status_code=302)
+        cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
+        cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось создать группу (возможно, уже существует)", "error")
+        return RedirectResponse("/v1/admin/groups", status_code=302)
+    conn.close()
+    audit_log(request, "create_group", details=f"group={normalized_name}, teacher_id={assigned_teacher}")
+    add_flash(request, "Группа создана и преподаватель привязан", "success")
+    return RedirectResponse(f"/v1/admin/groups/{normalized_name.replace(' ', '_')}", status_code=302)
+
+
+@app.post("/admin/groups/create")
+def admin_create_group(request: Request, group_name: str = Form(...), teacher_id: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    normalized_name = (group_name or "").strip()
+    if not normalized_name:
+        add_flash(request, "Название группы обязательно", "error")
+        return RedirectResponse("/admin/groups", status_code=302)
+    if not teacher_id:
+        add_flash(request, "Для группы нужно выбрать преподавателя", "error")
+        return RedirectResponse("/admin/groups", status_code=302)
+    assigned_teacher = None
+    if teacher_id:
+        try:
+            assigned_teacher = int(teacher_id)
+        except ValueError:
+            assigned_teacher = None
+    if not assigned_teacher:
+        add_flash(request, "Некорректный преподаватель", "error")
+        return RedirectResponse("/admin/groups", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (assigned_teacher,))
+        if not cur.fetchone():
+            conn.close()
+            add_flash(request, "Выбранный преподаватель не найден", "error")
+            return RedirectResponse("/admin/groups", status_code=302)
+        cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
+        cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось создать группу (возможно, уже существует)", "error")
+        return RedirectResponse("/admin/groups", status_code=302)
+    conn.close()
+    audit_log(request, "create_group", details=f"group={normalized_name}, teacher_id={assigned_teacher}")
+    add_flash(request, "Группа создана и преподаватель привязан", "success")
+    return RedirectResponse(f"/admin/groups/{normalized_name.replace(' ', '_')}", status_code=302)
+
+
+@app.post("/admin/disciplines/create")
+def admin_create_discipline(request: Request, discipline_name: str = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    normalized_name = normalize_discipline_name(discipline_name)
+    if not normalized_name:
+        add_flash(request, "Название дисциплины обязательно", "error")
+        return RedirectResponse("/admin/disciplines", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        _, created = create_or_get_discipline(cur, normalized_name)
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось добавить дисциплину", "error")
+        return RedirectResponse("/admin/disciplines", status_code=302)
+    conn.close()
+
+    audit_log(request, "create_discipline", details=f"admin_id={user['id']}, discipline={normalized_name}, created={created}")
+    if created:
+        add_flash(request, "Дисциплина создана", "success")
+    else:
+        add_flash(request, "Такая дисциплина уже существует", "info")
+    return RedirectResponse("/admin/disciplines", status_code=302)
+
+
+@app.post("/v1/admin/disciplines/create")
+def v1_admin_create_discipline(request: Request, discipline_name: str = Form(...)):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    normalized_name = normalize_discipline_name(discipline_name)
+    if not normalized_name:
+        add_flash(request, "Название дисциплины обязательно", "error")
+        return RedirectResponse("/v1/admin/disciplines", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        _, created = create_or_get_discipline(cur, normalized_name)
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось добавить дисциплину", "error")
+        return RedirectResponse("/v1/admin/disciplines", status_code=302)
+    conn.close()
+
+    audit_log(request, "create_discipline", details=f"v1_admin discipline={normalized_name}, created={created}")
+    if created:
+        add_flash(request, "Дисциплина создана", "success")
+    else:
+        add_flash(request, "Такая дисциплина уже существует", "info")
+    return RedirectResponse("/v1/admin/disciplines", status_code=302)
+
+
+@app.post("/v1/admin/groups/{group_name}/teacher")
+def v1_admin_bind_group_teacher(request: Request, group_name: str, teacher_id: str = Form(...)):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    try:
+        teacher_value = int(teacher_id)
+    except ValueError:
+        add_flash(request, "Некорректный преподаватель", "error")
+        return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
+
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
+    if not cur.fetchone():
+        conn.close()
+        add_flash(request, "Выбранный преподаватель не найден", "error")
+        return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
+    cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
+    cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
+    conn.commit()
+    conn.close()
+    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
+    add_flash(request, "Преподаватель закреплён за группой", "success")
+    return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
+
+
+@app.post("/admin/groups/{group_name}/teacher")
+def admin_bind_group_teacher(request: Request, group_name: str, teacher_id: str = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    try:
+        teacher_value = int(teacher_id)
+    except ValueError:
+        add_flash(request, "Некорректный преподаватель", "error")
+        return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
+
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
+    if not cur.fetchone():
+        conn.close()
+        add_flash(request, "Выбранный преподаватель не найден", "error")
+        return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
+    cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
+    cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
+    conn.commit()
+    conn.close()
+    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
+    add_flash(request, "Преподаватель закреплён за группой", "success")
+    return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
+
+
+@app.post("/v1/admin/groups/assign")
+def v1_admin_assign_group(request: Request, student_id: int = Form(...), student_group: str = Form("")):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    teacher_id = find_group_teacher_id(cur, normalized_group)
+    cur.execute("UPDATE users SET student_group = ?, assigned_teacher_id = ? WHERE id = ? AND role = 'student'", (normalized_group, teacher_id, student_id))
+    conn.commit()
+    conn.close()
+    audit_log(request, "assign_group", target_user_id=student_id, details=f"set to {normalized_group}")
+    add_flash(request, "Студент добавлен в группу", "success")
+    if normalized_group:
+        return RedirectResponse(f"/v1/admin/groups/{normalized_group.replace(' ', '_')}", status_code=302)
+    return RedirectResponse("/v1/admin/groups/Без_группы", status_code=302)
+
+
+@app.post("/admin/groups/assign")
+def admin_assign_group(request: Request, student_id: int = Form(...), student_group: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    teacher_id = find_group_teacher_id(cur, normalized_group)
+    cur.execute("UPDATE users SET student_group = ?, assigned_teacher_id = ? WHERE id = ? AND role = 'student'", (normalized_group, teacher_id, student_id))
+    conn.commit()
+    conn.close()
+    audit_log(request, "assign_group", target_user_id=student_id, details=f"set to {normalized_group}")
+    add_flash(request, "Студент добавлен в группу", "success")
+    if normalized_group:
+        return RedirectResponse(f"/admin/groups/{normalized_group.replace(' ', '_')}", status_code=302)
+    return RedirectResponse("/admin/groups/Без_группы", status_code=302)
+
+
+@app.post("/v1/admin/users/{user_id}/set_group")
+def v1_admin_set_group(request: Request, user_id: int, student_group: str = Form("")):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
+    prev = cur.fetchone()
+    prev_group = prev[0] if prev else None
+    normalized_group = (student_group or "").strip()
+    teacher_id = find_group_teacher_id(cur, normalized_group)
+    cur.execute("UPDATE users SET student_group = ?, assigned_teacher_id = ? WHERE id = ?", (normalized_group, teacher_id, user_id))
+    conn.commit()
+    conn.close()
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Группа обновлена", "success")
+    return RedirectResponse("/v1/admin/users", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/set_group")
+def admin_set_group(request: Request, user_id: int, student_group: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
+    prev = cur.fetchone()
+    prev_group = prev[0] if prev else None
+    normalized_group = (student_group or "").strip()
+    teacher_id = find_group_teacher_id(cur, normalized_group)
+    cur.execute("UPDATE users SET student_group = ?, assigned_teacher_id = ? WHERE id = ?", (normalized_group, teacher_id, user_id))
+    conn.commit()
+    conn.close()
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Группа обновлена", "success")
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.post("/v1/admin/users/create")
+def v1_admin_create_user(
+    request: Request,
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+    role: str = Form("teacher"),
+    assigned_teacher_id: str = Form(""),
+    student_group: str = Form(""),
+):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    target_page = "/v1/admin/teachers"
+    normalized_role = (role or "teacher").strip().lower()
+    if normalized_role != "teacher":
+        add_flash(request, "Через эту форму можно создать только преподавателя.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        add_flash(request, "Укажите ФИО.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    clean_login = validate_login(login or email)
+    if not clean_login:
+        add_flash(request, "Некорректный логин. Используйте 3-80 символов без пробелов.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    pw_ok, pw_err = validate_password(password)
+    if not pw_ok:
+        add_flash(request, pw_err, "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    salt = new_salt()
+    password_hash = hash_password(password, salt)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO users (role, full_name, email, password_hash, salt, assigned_teacher_id, student_group) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "teacher",
+                clean_name,
+                clean_login,
+                password_hash,
+                salt,
+                None,
+                "",
+            ),
+        )
+        new_user_id = cur.lastrowid
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось создать преподавателя (проверьте уникальность логина)", "error")
+        return RedirectResponse(target_page, status_code=302)
+    conn.close()
+
+    audit_log(request, "create_user", target_user_id=new_user_id, details=f"created teacher {clean_login}")
+    add_flash(request, "Преподаватель создан", "success")
+    return RedirectResponse(target_page, status_code=302)
+
+
+@app.post("/admin/users/create")
+def admin_create_user(
+    request: Request,
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+    role: str = Form("teacher"),
+    assigned_teacher_id: str = Form(""),
+    student_group: str = Form(""),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    target_page = "/admin/teachers"
+    normalized_role = (role or "teacher").strip().lower()
+    if normalized_role != "teacher":
+        add_flash(request, "Через эту форму можно создать только преподавателя.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        add_flash(request, "Укажите ФИО.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    clean_login = validate_login(login or email)
+    if not clean_login:
+        add_flash(request, "Некорректный логин. Используйте 3-80 символов без пробелов.", "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    pw_ok, pw_err = validate_password(password)
+    if not pw_ok:
+        add_flash(request, pw_err, "error")
+        return RedirectResponse(target_page, status_code=302)
+
+    salt = new_salt()
+    password_hash = hash_password(password, salt)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO users (role, full_name, email, password_hash, salt, assigned_teacher_id, student_group) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "teacher",
+                clean_name,
+                clean_login,
+                password_hash,
+                salt,
+                None,
+                "",
+            ),
+        )
+        new_user_id = cur.lastrowid
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось создать преподавателя (проверьте уникальность логина)", "error")
+        return RedirectResponse(target_page, status_code=302)
+    conn.close()
+
+    audit_log(request, "create_user", target_user_id=new_user_id, details=f"created teacher {clean_login}")
+    add_flash(request, "Преподаватель создан", "success")
+    return RedirectResponse(target_page, status_code=302)
+
+
+@app.get("/v1/admin/users/{user_id}/edit", response_class=HTMLResponse)
+def v1_admin_user_edit(request: Request, user_id: int):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE id = ?", (user_id,))
+    raw = cur.fetchone()
+    row = user_row_to_dict(raw) if raw else None
+    if not row:
+        conn.close()
+        return RedirectResponse("/v1/admin/users", status_code=302)
+    cur.execute("SELECT id, full_name FROM users WHERE role = 'teacher' ORDER BY full_name")
+    teachers = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return templates.TemplateResponse("admin_user_edit.html", {"request": request, "mode": "v1_admin", "user": dict(row), "teachers": teachers})
+
+
+@app.post("/v1/admin/users/{user_id}/edit")
+def v1_admin_user_edit_post(
+    request: Request,
+    user_id: int,
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    role: str = Form(...),
+    assigned_teacher_id: str = Form(""),
+    student_group: str = Form(""),
+):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+
+    clean_login = validate_login(login or email)
+    if not clean_login:
+        add_flash(request, "Некорректный логин. Используйте 3-80 символов без пробелов.", "error")
+        return RedirectResponse(f"/v1/admin/users/{user_id}/edit", status_code=302)
+
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        add_flash(request, "Укажите ФИО.", "error")
+        return RedirectResponse(f"/v1/admin/users/{user_id}/edit", status_code=302)
+
+    assigned = None
+    if assigned_teacher_id:
+        try:
+            assigned = int(assigned_teacher_id)
+        except ValueError:
+            assigned = None
+    conn = connect()
+    cur = conn.cursor()
+    # read previous value for audit
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
+    prev = cur.fetchone()
+    prev_group = prev[0] if prev else None
+    try:
+        cur.execute(
+            "UPDATE users SET full_name = ?, email = ?, role = ?, assigned_teacher_id = ?, student_group = ? WHERE id = ?",
+            (clean_name, clean_login, role.strip(), assigned, (student_group or "").strip(), user_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось обновить пользователя (логин уже занят).", "error")
+        return RedirectResponse(f"/v1/admin/users/{user_id}/edit", status_code=302)
+    conn.close()
+    # audit and flash
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Информация пользователя обновлена", "success")
+    return RedirectResponse("/v1/admin/users", status_code=302)
+
+
+@app.post("/v1/admin/users/{user_id}/delete")
+def v1_admin_user_delete(request: Request, user_id: int):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return RedirectResponse("/v1/admin/users", status_code=302)
+    # Only allow deleting students via admin panel for anti-fraud
+    if row["role"] != "student":
+        # do not delete non-students; just redirect back to users list
+        conn.close()
+        return RedirectResponse("/v1/admin/users", status_code=302)
+
+    # remove dependent records: answers -> attempts -> user
+    cur.execute("DELETE FROM answers WHERE attempt_id IN (SELECT id FROM attempts WHERE student_id = ?)", (user_id,))
+    cur.execute("DELETE FROM attempts WHERE student_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    # audit log and flash
+    audit_log(request, "delete_user", target_user_id=user_id, details="deleted student via v1 admin")
+    add_flash(request, "Пользователь удалён", "success")
+    return RedirectResponse("/v1/admin/users", status_code=302)
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_user_delete(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return RedirectResponse("/admin/users", status_code=302)
+    if row["role"] != "student":
+        conn.close()
+        return RedirectResponse("/admin/users", status_code=302)
+
+    cur.execute("DELETE FROM answers WHERE attempt_id IN (SELECT id FROM attempts WHERE student_id = ?)", (user_id,))
+    cur.execute("DELETE FROM attempts WHERE student_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    audit_log(request, "delete_user", target_user_id=user_id, details="deleted student via admin")
+    add_flash(request, "Пользователь удалён", "success")
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.get("/admin/users/{user_id}/edit", response_class=HTMLResponse)
+def admin_user_edit(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE id = ?", (user_id,))
+    raw = cur.fetchone()
+    row = user_row_to_dict(raw) if raw else None
+    if not row:
+        conn.close()
+        return RedirectResponse("/admin/users", status_code=302)
+    cur.execute("SELECT id, full_name FROM users WHERE role = 'teacher' ORDER BY full_name")
+    teachers = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return render(request, "admin_user_edit.html", {"mode": "admin", "user": dict(row), "teachers": teachers})
+
+
+@app.post("/admin/users/{user_id}/edit")
+def admin_user_edit_post(
+    request: Request,
+    user_id: int,
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    role: str = Form(...),
+    assigned_teacher_id: str = Form(""),
+    student_group: str = Form(""),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+
+    clean_login = validate_login(login or email)
+    if not clean_login:
+        add_flash(request, "Некорректный логин. Используйте 3-80 символов без пробелов.", "error")
+        return RedirectResponse(f"/admin/users/{user_id}/edit", status_code=302)
+
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        add_flash(request, "Укажите ФИО.", "error")
+        return RedirectResponse(f"/admin/users/{user_id}/edit", status_code=302)
+
+    assigned = None
+    if assigned_teacher_id:
+        try:
+            assigned = int(assigned_teacher_id)
+        except ValueError:
+            assigned = None
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
+    prev = cur.fetchone()
+    prev_group = prev[0] if prev else None
+    try:
+        cur.execute(
+            "UPDATE users SET full_name = ?, email = ?, role = ?, assigned_teacher_id = ?, student_group = ? WHERE id = ?",
+            (clean_name, clean_login, role.strip(), assigned, (student_group or "").strip(), user_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось обновить пользователя (логин уже занят).", "error")
+        return RedirectResponse(f"/admin/users/{user_id}/edit", status_code=302)
+    conn.close()
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Информация пользователя обновлена", "success")
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.get("/teacher/analytics", response_class=HTMLResponse)
+def teacher_analytics(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT attempts.score, attempts.taken_at, tests.id AS test_id,
+               tests.title AS test_title, users.full_name AS student_name
+        FROM attempts
+        JOIN tests ON tests.id = attempts.test_id
+        JOIN lectures ON lectures.id = tests.lecture_id
+        JOIN users ON users.id = attempts.student_id
+        WHERE lectures.teacher_id = ?
+        ORDER BY attempts.taken_at DESC
+        """,
+        (user["id"],),
+    )
+    rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT tests.id AS test_id, tests.title AS test_title
+        FROM tests
+        JOIN lectures ON lectures.id = tests.lecture_id
+        WHERE lectures.teacher_id = ?
+        ORDER BY tests.id DESC
+        """,
+        (user["id"],),
+    )
+    tests = {r["test_id"]: r["test_title"] for r in cur.fetchall()}
+    conn.close()
+
+    total_attempts = len(rows)
+    unique_students = len({r["student_name"] for r in rows}) if rows else 0
+    scores = [r["score"] for r in rows]
+    overall_avg = round(sum(scores) / len(scores), 2) if scores else 0.0
+
+    per_test: dict[int, dict[str, Any]] = {}
+    for tid, title in tests.items():
+        per_test[tid] = {
+            "title": title,
+            "attempts": 0,
+            "avg": 0.0,
+            "best": 0.0,
+            "worst": 0.0,
+        }
+
+    for r in rows:
+        tid = r["test_id"]
+        entry = per_test.get(tid)
+        if not entry:
+            continue
+        entry.setdefault("_scores", []).append(r["score"])
+
+    for entry in per_test.values():
+        scores_list = entry.pop("_scores", [])
+        if scores_list:
+            entry["attempts"] = len(scores_list)
+            entry["avg"] = round(sum(scores_list) / len(scores_list), 2)
+            entry["best"] = max(scores_list)
+            entry["worst"] = min(scores_list)
+
+    per_test_list = list(per_test.values())
+    per_test_list.sort(key=lambda x: x["attempts"], reverse=True)
+
+    student_totals: dict[str, list[float]] = {}
+    for r in rows:
+        student_totals.setdefault(r["student_name"], []).append(r["score"])
+    student_avg = [
+        {
+            "name": name,
+            "avg": round(sum(vals) / len(vals), 2),
+            "attempts": len(vals),
+        }
+        for name, vals in student_totals.items()
+    ]
+    student_avg.sort(key=lambda x: x["avg"], reverse=True)
+
+    return render(
+        request,
+        "teacher_analytics.html",
+        {
+            "total_attempts": total_attempts,
+            "unique_students": unique_students,
+            "overall_avg": overall_avg,
+            "per_test": per_test_list,
+            "student_avg": student_avg,
+        },
+    )
+
+
+@app.get("/v1/teacher/users", response_class=HTMLResponse)
+def v1_teacher_users(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE assigned_teacher_id = ? ORDER BY full_name", (user["id"],))
+    students = [user_row_to_dict(r) for r in cur.fetchall()]
+    conn.close()
+    return templates.TemplateResponse("admin_users.html", {"request": request, "users": students, "mode": "v1_teacher", "query": "", "page_kind": "students", "page_title": "Студенты"})
+
+
+@app.get("/v1/teacher/groups/{group_name}", response_class=HTMLResponse)
+def v1_teacher_group(request: Request, group_name: str):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    name = group_name.replace("_", " ")
+    conn = connect()
+    cur = conn.cursor()
+    if name == "Без группы":
+        cur.execute(
+            """
+            SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
+            FROM users
+            WHERE role = 'student' AND assigned_teacher_id = ? AND (student_group IS NULL OR student_group = '')
+            ORDER BY full_name
+            """,
+            (user["id"],),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
+            FROM users
+            WHERE role = 'student' AND assigned_teacher_id = ? AND student_group = ?
+            ORDER BY full_name
+            """,
+            (user["id"], name),
+        )
+    rows = [user_row_to_dict(r) for r in cur.fetchall()]
+    conn.close()
+    return templates.TemplateResponse(
+        "admin_users.html",
+        {
+            "request": request,
+            "users": rows,
+            "mode": "v1_teacher",
+            "query": "",
+            "page_kind": "students",
+            "page_title": f"Студенты группы {name}",
+        },
+    )
+
+
+@app.get("/v1/teacher/users/{user_id}/edit", response_class=HTMLResponse)
+def v1_teacher_user_edit(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE id = ?", (user_id,))
+    raw = cur.fetchone()
+    row = user_row_to_dict(raw) if raw else None
+    if not row:
+        conn.close()
+        return RedirectResponse("/v1/teacher/users", status_code=302)
+    # only allow teacher to edit students assigned to them
+    if row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        return RedirectResponse("/v1/teacher/users", status_code=302)
+    conn.close()
+    return templates.TemplateResponse("admin_user_edit.html", {"request": request, "user": dict(row), "teachers": []})
+
+
+@app.post("/v1/teacher/users/{user_id}/edit")
+def v1_teacher_user_edit_post(request: Request, user_id: int, student_group: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, assigned_teacher_id FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        return RedirectResponse("/v1/teacher/users", status_code=302)
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
+    prev = cur.fetchone()
+    prev_group = prev[0] if prev else None
+    cur.execute("UPDATE users SET student_group = ? WHERE id = ?", ((student_group or "").strip(), user_id))
+    conn.commit()
+    conn.close()
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group_by_teacher", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Группа обновлена", "success")
+    return RedirectResponse("/v1/teacher/users", status_code=302)
+
+
+@app.post("/v1/teacher/users/{user_id}/set_group")
+def v1_teacher_set_group(request: Request, user_id: int, student_group: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT assigned_teacher_id, student_group FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        add_flash(request, "Нет доступа для изменения группы этого студента", "error")
+        return RedirectResponse("/v1/teacher/users", status_code=302)
+    prev_group = row["student_group"]
+    cur.execute("UPDATE users SET student_group = ? WHERE id = ?", ((student_group or "").strip(), user_id))
+    conn.commit()
+    conn.close()
+    if (prev_group or "") != ((student_group or "") or ""):
+        audit_log(request, "change_group_by_teacher", target_user_id=user_id, details=f"from {prev_group} to {student_group}")
+    add_flash(request, "Группа обновлена", "success")
+    return RedirectResponse("/v1/teacher/users", status_code=302)
+
+
+@app.get("/v2/teacher", response_class=HTMLResponse)
+def v2_teacher_index(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.get("/v2/teacher/disciplines", response_class=HTMLResponse)
+def v2_teacher_disciplines(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (user["id"],),
+    )
+    disciplines = [dict(row) for row in cur.fetchall()]
+    assigned_ids = {int(item["id"]) for item in disciplines}
+
+    cur.execute("SELECT id, name FROM disciplines ORDER BY name")
+    all_disciplines = [dict(row) for row in cur.fetchall()]
+    available_disciplines = [d for d in all_disciplines if int(d["id"]) not in assigned_ids]
+
+    for discipline in disciplines:
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM lectures WHERE teacher_id = ? AND discipline_id = ?",
+            (user["id"], discipline["id"]),
+        )
+        lecture_count = int(cur.fetchone()["cnt"])
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM tests
+            JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.teacher_id = ? AND lectures.discipline_id = ?
+            """,
+            (user["id"], discipline["id"]),
+        )
+        test_count = int(cur.fetchone()["cnt"])
+
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM users WHERE role = 'student' AND assigned_teacher_id = ?",
+            (user["id"],),
+        )
+        student_count = int(cur.fetchone()["cnt"])
+
+        discipline["lecture_count"] = lecture_count
+        discipline["test_count"] = test_count
+        discipline["student_count"] = student_count
+
+    conn.close()
+    return render(
+        request,
+        "v2_teacher_disciplines.html",
+        {
+            "active_tab": "disciplines",
+            "disciplines": disciplines,
+            "available_disciplines": available_disciplines,
+        },
+    )
+
+
+@app.post("/v2/teacher/disciplines/create")
+def v2_teacher_create_discipline(request: Request, discipline_name: str = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    normalized_name = normalize_discipline_name(discipline_name)
+    if not normalized_name:
+        add_flash(request, "Название дисциплины обязательно", "error")
+        return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        discipline_id, created = create_or_get_discipline(cur, normalized_name)
+        cur.execute(
+            "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+            (user["id"], discipline_id),
+        )
+        assigned = cur.rowcount > 0
+        conn.commit()
+    except Exception:
+        conn.close()
+        add_flash(request, "Не удалось добавить дисциплину", "error")
+        return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+    conn.close()
+
+    audit_log(
+        request,
+        "create_discipline",
+        details=f"teacher_id={user['id']}, discipline={normalized_name}, created={created}, assigned={assigned}",
+    )
+    if created:
+        add_flash(request, "Дисциплина создана и добавлена в ваш список", "success")
+    elif assigned:
+        add_flash(request, "Дисциплина уже существовала и добавлена в ваш список", "success")
+    else:
+        add_flash(request, "Эта дисциплина уже есть в вашем списке", "info")
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.get("/v2/teacher/disciplines/create")
+def v2_teacher_create_discipline_get(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.post("/v2/teacher/disciplines/attach")
+def v2_teacher_attach_discipline(request: Request, discipline_id: int = Form(...)):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    if not discipline:
+        conn.close()
+        add_flash(request, "Дисциплина не найдена", "error")
+        return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+    cur.execute(
+        "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+        (user["id"], discipline_id),
+    )
+    linked = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+
+    discipline_name = discipline["name"]
+    audit_log(
+        request,
+        "attach_discipline",
+        details=f"teacher_id={user['id']}, discipline_id={discipline_id}, linked={linked}",
+    )
+    if linked:
+        add_flash(request, f"Дисциплина «{discipline_name}» добавлена в ваш список", "success")
+    else:
+        add_flash(request, f"Дисциплина «{discipline_name}» уже была у вас", "info")
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.post("/v2/teacher/disciplines/{discipline_id}/detach")
+def v2_teacher_detach_discipline(request: Request, discipline_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    if not discipline:
+        conn.close()
+        add_flash(request, "Дисциплина не найдена", "error")
+        return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+    cur.execute(
+        "DELETE FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
+        (user["id"], discipline_id),
+    )
+    detached = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+
+    discipline_name = discipline["name"]
+    audit_log(
+        request,
+        "detach_discipline",
+        details=f"teacher_id={user['id']}, discipline_id={discipline_id}, detached={detached}",
+    )
+    if detached:
+        add_flash(request, f"Дисциплина «{discipline_name}» отвязана", "success")
+    else:
+        add_flash(request, f"Дисциплина «{discipline_name}» не была привязана", "info")
+    return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.get("/v2/teacher/tests", response_class=HTMLResponse)
+def v2_teacher_tests(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    discipline_filter_raw = request.query_params.get("discipline_id", "")
+    discipline_filter: int | None = None
+    try:
+        if discipline_filter_raw:
+            discipline_filter = int(discipline_filter_raw)
+    except Exception:
+        discipline_filter = None
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (user["id"],),
+    )
+    disciplines = [dict(row) for row in cur.fetchall()]
+
+    if not discipline_filter and disciplines:
+        discipline_filter = int(disciplines[0]["id"])
+
+    if discipline_filter:
+        cur.execute(
+            "SELECT id, title, created_at FROM lectures WHERE teacher_id = ? AND discipline_id = ? ORDER BY id DESC",
+            (user["id"], discipline_filter),
+        )
+    else:
+        cur.execute("SELECT id, title, created_at FROM lectures WHERE teacher_id = ? ORDER BY id DESC", (user["id"],))
+    lectures = [dict(r) for r in cur.fetchall()]
+
+    if discipline_filter:
+        cur.execute(
+            """
+            SELECT tests.id, tests.title, tests.status, tests.created_at, lectures.title AS lecture_title
+            FROM tests JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.teacher_id = ? AND lectures.discipline_id = ?
+            ORDER BY tests.id DESC
+            """,
+            (user["id"], discipline_filter),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT tests.id, tests.title, tests.status, tests.created_at, lectures.title AS lecture_title
+            FROM tests JOIN lectures ON lectures.id = tests.lecture_id
+            WHERE lectures.teacher_id = ?
+            ORDER BY tests.id DESC
+            """,
+            (user["id"],),
+        )
+    tests = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return render(
+        request,
+        "v2_teacher_tests.html",
+        {
+            "active_tab": "tests",
+            "lectures": lectures,
+            "tests": tests,
+            "disciplines": disciplines,
+            "selected_discipline_id": discipline_filter,
+        },
+    )
+
+
+@app.get("/v2/teacher/students", response_class=HTMLResponse)
+def v2_teacher_students(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
+    available_groups = [row["name"] for row in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT id, full_name, email, last_login, student_group
+        FROM users
+        WHERE role = 'student' AND assigned_teacher_id = ?
+        ORDER BY student_group, full_name
+        """,
+        (user["id"],),
+    )
+    students = [user_row_to_dict(r) for r in cur.fetchall()]
+    conn.close()
+    return render(
+        request,
+        "v2_teacher_students.html",
+        {
+            "active_tab": "students",
+            "students": students,
+            "available_groups": available_groups,
+        },
+    )
+
+
+@app.post("/v2/teacher/students/{user_id}/set_group")
+def v2_teacher_set_group(request: Request, user_id: int, student_group: str = Form("")):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    next_path = request.query_params.get("next", "/v2/teacher/students")
+    if not next_path.startswith("/"):
+        next_path = "/v2/teacher/students"
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT assigned_teacher_id, student_group FROM users WHERE id = ? AND role = 'student'", (user_id,))
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        add_flash(request, "Нет доступа к этому студенту", "error")
+        return RedirectResponse(next_path, status_code=302)
+
+    normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    cur.execute("UPDATE users SET student_group = ? WHERE id = ?", (normalized_group, user_id))
+    conn.commit()
+    conn.close()
+    add_flash(request, "Группа студента обновлена", "success")
+    return RedirectResponse(next_path, status_code=302)
+
+
+@app.get("/v2/teacher/students/{user_id}/edit", response_class=HTMLResponse)
+def v2_teacher_student_edit(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, full_name, email, student_group, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        return RedirectResponse("/v2/teacher/students", status_code=302)
+
+    cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
+    available_groups = [group_row["name"] for group_row in cur.fetchall()]
+    conn.close()
+
+    return render(
+        request,
+        "v2_teacher_student_edit.html",
+        {
+            "active_tab": "students",
+            "student": dict(row),
+            "available_groups": available_groups,
+            "error": None,
+        },
+    )
+
+
+@app.post("/v2/teacher/students/{user_id}/edit")
+def v2_teacher_student_edit_post(
+    request: Request,
+    user_id: int,
+    full_name: str = Form(...),
+    login: str = Form(""),
+    email: str = Form(""),
+    student_group: str = Form(""),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        return RedirectResponse("/v2/teacher/students", status_code=302)
+
+    normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    clean_login = validate_login(login or email)
+    clean_name = sanitize_full_name(full_name)
+    if not clean_login or not clean_name:
+        cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
+        available_groups = [group_row["name"] for group_row in cur.fetchall()]
+        cur.execute(
+            "SELECT id, full_name, email, student_group FROM users WHERE id = ?",
+            (user_id,),
+        )
+        student_row = cur.fetchone()
+        conn.close()
+        return render(
+            request,
+            "v2_teacher_student_edit.html",
+            {
+                "active_tab": "students",
+                "student": dict(student_row) if student_row else {"id": user_id, "full_name": clean_name or full_name, "email": clean_login or (login or email), "student_group": normalized_group},
+                "available_groups": available_groups,
+                "error": "Проверьте ФИО и логин (логин: 3-80 символов без пробелов).",
+            },
+        )
+    try:
+        cur.execute(
+            "UPDATE users SET full_name = ?, email = ?, student_group = ? WHERE id = ?",
+            (clean_name, clean_login, normalized_group, user_id),
+        )
+        conn.commit()
+    except Exception:
+        cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
+        available_groups = [group_row["name"] for group_row in cur.fetchall()]
+        cur.execute(
+            "SELECT id, full_name, email, student_group FROM users WHERE id = ?",
+            (user_id,),
+        )
+        student_row = cur.fetchone()
+        conn.close()
+        return render(
+            request,
+            "v2_teacher_student_edit.html",
+            {
+                "active_tab": "students",
+                "student": dict(student_row) if student_row else {"id": user_id, "full_name": clean_name, "email": clean_login, "student_group": normalized_group},
+                "available_groups": available_groups,
+                "error": "Не удалось сохранить (возможно, логин уже используется).",
+            },
+        )
+
+    conn.close()
+    add_flash(request, "Профиль студента обновлён", "success")
+    return RedirectResponse("/v2/teacher/students", status_code=302)
+
+
+@app.post("/v2/teacher/students/{user_id}/delete")
+def v2_teacher_student_delete(request: Request, user_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT assigned_teacher_id FROM users WHERE id = ? AND role = 'student'", (user_id,))
+    row = cur.fetchone()
+    if not row or row["assigned_teacher_id"] != user["id"]:
+        conn.close()
+        add_flash(request, "Нет доступа к этому студенту", "error")
+        return RedirectResponse("/v2/teacher/students", status_code=302)
+
+    cur.execute("DELETE FROM answers WHERE attempt_id IN (SELECT id FROM attempts WHERE student_id = ?)", (user_id,))
+    cur.execute("DELETE FROM attempts WHERE student_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    add_flash(request, "Студент удалён", "success")
+    return RedirectResponse("/v2/teacher/students", status_code=302)
+
+
+@app.get("/v2/teacher/analytics", response_class=HTMLResponse)
+def v2_teacher_analytics(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    discipline_filter_raw = request.query_params.get("discipline_id", "")
+    discipline_filter: int | None = None
+    try:
+        if discipline_filter_raw:
+            discipline_filter = int(discipline_filter_raw)
+    except Exception:
+        discipline_filter = None
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ?
+        ORDER BY d.name
+        """,
+        (user["id"],),
+    )
+    disciplines = [dict(row) for row in cur.fetchall()]
+
+    if not discipline_filter and disciplines:
+        discipline_filter = int(disciplines[0]["id"])
+
+    if discipline_filter:
+        cur.execute(
+            """
+            SELECT users.id AS student_id, users.full_name AS student_name, attempts.score, attempts.taken_at,
+                   users.student_group
+            FROM attempts
+            JOIN tests ON tests.id = attempts.test_id
+            JOIN lectures ON lectures.id = tests.lecture_id
+            JOIN users ON users.id = attempts.student_id
+            WHERE lectures.teacher_id = ? AND lectures.discipline_id = ?
+            ORDER BY users.full_name
+            """,
+            (user["id"], discipline_filter),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT users.id AS student_id, users.full_name AS student_name, attempts.score, attempts.taken_at,
+                   users.student_group
+            FROM attempts
+            JOIN tests ON tests.id = attempts.test_id
+            JOIN lectures ON lectures.id = tests.lecture_id
+            JOIN users ON users.id = attempts.student_id
+            WHERE lectures.teacher_id = ?
+            ORDER BY users.full_name
+            """,
+            (user["id"],),
+        )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    by_student: dict[int, dict[str, Any]] = {}
+    by_group: dict[str, list[float]] = {}
+    for row in rows:
+        student_id = row["student_id"]
+        if student_id not in by_student:
+            by_student[student_id] = {"name": row["student_name"], "scores": []}
+        by_student[student_id]["scores"].append(row["score"])
+        group_name = (row.get("student_group") or "Без группы").strip() or "Без группы"
+        by_group.setdefault(group_name, []).append(float(row["score"]))
+
+    metrics = []
+    for data in by_student.values():
+        scores = data["scores"]
+        attempts = len(scores)
+        avg_score = round(sum(scores) / attempts, 2) if attempts else 0.0
+        passed = len([score for score in scores if score >= 60])
+        pass_rate = round((passed / attempts) * 100, 2) if attempts else 0.0
+        metrics.append({"name": data["name"], "attempts": attempts, "avg_score": avg_score, "pass_rate": pass_rate})
+    metrics.sort(key=lambda entry: entry["avg_score"], reverse=True)
+
+    group_metrics: list[dict[str, Any]] = []
+    for group_name, group_scores in by_group.items():
+        avg_group_score = round(sum(group_scores) / len(group_scores), 2) if group_scores else 0.0
+        group_metrics.append({"group": group_name, "avg_score": avg_group_score, "attempts": len(group_scores)})
+    group_metrics.sort(key=lambda entry: entry["avg_score"], reverse=True)
+
+    timeline: dict[str, list[float]] = {}
+    timeline_order: dict[str, int] = {}
+    for row in rows:
+        raw_ts = row.get("taken_at")
+        if not raw_ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw_ts))
+            key = dt.strftime("%d.%m")
+            timeline.setdefault(key, []).append(float(row["score"]))
+            order_value = dt.date().toordinal()
+            if key not in timeline_order or order_value < timeline_order[key]:
+                timeline_order[key] = order_value
+        except Exception:
+            continue
+
+    ordered_labels = [label for label, _ in sorted(timeline_order.items(), key=lambda pair: pair[1])]
+    trend_labels = ordered_labels
+    trend_values = [round(sum(values) / len(values), 2) for values in timeline.values()]
+    if ordered_labels:
+        trend_values = [round(sum(timeline[label]) / len(timeline[label]), 2) for label in ordered_labels]
+
+    trend_svg = ""
+    if trend_values:
+        min_v = min(trend_values)
+        max_v = max(trend_values)
+        span = max_v - min_v if max_v != min_v else 1.0
+        width = 420.0
+        height = 140.0
+        step_x = width / max(1, len(trend_values) - 1)
+        points: list[tuple[float, float]] = []
+        for i, value in enumerate(trend_values):
+            x = i * step_x
+            y = height - ((value - min_v) / span) * height
+            points.append((x, y))
+        trend_svg = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+
+    overall_avg = round(sum(float(r["score"]) for r in rows) / len(rows), 2) if rows else 0.0
+    total_attempts = len(rows)
+    total_students = len(by_student)
+
+    return render(
+        request,
+        "v2_teacher_analytics.html",
+        {
+            "active_tab": "analytics",
+            "metrics": metrics,
+            "group_metrics": group_metrics,
+            "trend_labels": trend_labels,
+            "trend_values": trend_values,
+            "trend_svg": trend_svg,
+            "overall_avg": overall_avg,
+            "total_attempts": total_attempts,
+            "total_students": total_students,
+            "disciplines": disciplines,
+            "selected_discipline_id": discipline_filter,
+        },
+    )
+
+
+# ── Скрываем HTML-маршруты из OpenAPI-схемы (/docs) ──────────
+# Оставляем только /api/* эндпоинты видимыми в Swagger.
+from starlette.routing import Route as _StarletteRoute  # noqa: E402
+for _route in app.routes:
+    _path = getattr(_route, "path", "")
+    if isinstance(_route, _StarletteRoute) and not _path.startswith("/api"):
+        _route.include_in_schema = False

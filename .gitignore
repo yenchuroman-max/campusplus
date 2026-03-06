@@ -1,0 +1,12 @@
+﻿venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.vscode/
+server.out.log
+server.err.log
+uploads/
+app/app.db
+tools/mingit/

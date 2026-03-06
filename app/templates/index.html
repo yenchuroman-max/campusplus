@@ -1,0 +1,246 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="spotlight">
+  <article class="spotlight-stage">
+    <div class="spotlight-content">
+      {% if current_user and current_user.role == 'student' %}
+      <span class="spotlight-tag">Студент</span>
+      <h1>Здравствуйте, {{ current_user.full_name }}</h1>
+      <p class="spotlight-text">
+        Проходите доступные тесты по дисциплинам и следите за своим прогрессом.
+        Здесь только главное: тесты, результаты и динамика успеваемости.
+      </p>
+      <div class="spotlight-meta">
+        <span>Тестирование</span>
+        <span>{{ main_chart.avg if main_chart else '0%' }} ваш средний балл</span>
+      </div>
+      {% elif current_user and current_user.role == 'teacher' %}
+      <span class="spotlight-tag">Преподаватель</span>
+      <h1>Здравствуйте, {{ current_user.full_name }}</h1>
+      <p class="spotlight-text">
+        Создавайте лекции и тесты, отслеживайте результаты студентов и контролируйте
+        успеваемость группы в едином рабочем пространстве.
+      </p>
+      <div class="spotlight-meta">
+        <span>Курс и контроль</span>
+        <span>{{ main_chart.avg if main_chart else '82%' }} средний балл группы</span>
+      </div>
+      {% elif current_user and current_user.role == 'admin' %}
+      <span class="spotlight-tag">Администратор</span>
+      <h1>Здравствуйте, {{ current_user.full_name }}</h1>
+      <p class="spotlight-text">
+        Управляйте пользователями, группами и дисциплинами. Поддерживайте
+        корректную структуру учебного процесса и доступов в системе.
+      </p>
+      <div class="spotlight-meta">
+        <span>Управление системой</span>
+        <span>{{ main_chart.activity if main_chart else '98' }} активностей</span>
+      </div>
+      {% else %}
+      <span class="spotlight-tag">СГУГиТ</span>
+      <h1>КампусПлюс: мониторинг успеваемости</h1>
+      <p class="spotlight-text">
+        Платформа для учебного контроля: тестирование студентов, аналитика
+        результатов и прозрачный мониторинг прогресса.
+      </p>
+      <p class="spotlight-text">
+        Преподаватель работает с лекциями и тестами, студент видит только
+        доступные тесты и свой прогресс.
+      </p>
+      <div class="spotlight-meta">
+        <span>Образовательная аналитика</span>
+        <span>{{ main_chart.avg if main_chart else '82%' }} средний балл</span>
+      </div>
+      {% endif %}
+      {% if not current_user %}
+      <div class="spotlight-actions">
+        <a class="button" href="/login">Смотреть кабинет</a>
+        <a class="button secondary" href="/register">Создать аккаунт</a>
+      </div>
+      {% endif %}
+    </div>
+    <aside class="spotlight-panel">
+      <div class="spotlight-panel-title">
+        {% if current_user and current_user.role == 'student' %}
+          Ваш прогресс
+        {% elif current_user and current_user.role == 'teacher' %}
+          Пульс группы
+        {% elif current_user and current_user.role == 'admin' %}
+          Срез системы
+        {% else %}
+          Пульс группы
+        {% endif %}
+      </div>
+      <div class="spotlight-panel-value">{{ main_chart.avg if main_chart else '82%' }}</div>
+      <div class="spotlight-panel-hint">
+        {% if current_user and current_user.role == 'student' %}
+          Ваш текущий средний балл
+        {% elif current_user and current_user.role == 'teacher' %}
+          Текущий средний балл группы
+        {% elif current_user and current_user.role == 'admin' %}
+          Сводный показатель успеваемости
+        {% else %}
+          Текущий средний балл
+        {% endif %}
+      </div>
+      <svg viewBox="0 0 220 90" class="spotlight-mini-chart" aria-hidden="true">
+        <defs>
+          <linearGradient id="spotlineGrad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stop-color="#d78393" />
+            <stop offset="100%" stop-color="#8ea2d0" />
+          </linearGradient>
+          <linearGradient id="spotfillGrad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="rgba(215,131,147,0.30)" />
+            <stop offset="100%" stop-color="rgba(142,162,208,0.05)" />
+          </linearGradient>
+        </defs>
+        <path d="M12 74 L42 68 L72 70 L102 56 L132 52 L162 36 L192 26 L208 22 L208 84 L12 84 Z" fill="url(#spotfillGrad)" />
+        <polyline points="12,74 42,68 72,70 102,56 132,52 162,36 192,26 208,22" fill="none" stroke="url(#spotlineGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="spotlight-badges">
+        <span class="spotlight-badge">{{ main_chart.chip if main_chart else '+24%' }}</span>
+        <span class="spotlight-badge muted">{{ main_chart.trend if main_chart else '↑ вверх' }}</span>
+      </div>
+    </aside>
+  </article>
+</section>
+<section class="grid">
+  {% if current_user and current_user.role == 'student' %}
+  <a class="link-card card clickable" href="/dashboard">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5zm0 13l-10-5v6l10 5 10-5v-6l-10 5z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Личный кабинет</div>
+        <div class="card-desc">Персональная аналитика, история и результаты.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/student/tests">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9 2v2H5v14h14V9h2V2H9zM7 4h2v2H7V4zm10 12H9V8h8v8z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Доступные тесты</div>
+        <div class="card-desc">Открытые тесты по вашим дисциплинам.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/growth">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zM4 20v-1c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Точки роста</div>
+        <div class="card-desc">Темы и рекомендации по улучшению успеваемости.</div>
+      </div>
+    </div>
+  </a>
+  {% elif current_user and current_user.role == 'teacher' %}
+  <a class="link-card card clickable" href="/v2/teacher">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 4h16v2H4V4zm1 4h14v11H5V8zm2 2v2h3v-2H7zm0 4v2h10v-2H7z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Панель преподавателя</div>
+        <div class="card-desc">Дисциплины, тесты, студенты и управление курсом.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/teacher/lectures">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 3h14a2 2 0 0 1 2 2v14l-4-2-4 2-4-2-4 2V5a2 2 0 0 1 2-2z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Мои лекции</div>
+        <div class="card-desc">Создание лекций и генерация тестов по материалам.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/teacher/analytics">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 20V4h2v16H4zm5 0v-9h2v9H9zm5 0v-6h2v6h-2zm5 0V8h2v12h-2z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Аналитика группы</div>
+        <div class="card-desc">Динамика баллов, ошибки и прогресс студентов.</div>
+      </div>
+    </div>
+  </a>
+  {% elif current_user and current_user.role == 'admin' %}
+  <a class="link-card card clickable" href="/admin/students">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 12c2.2 0 4-1.8 4-4S14.2 4 12 4 8 5.8 8 8s1.8 4 4 4zm0 2c-3.3 0-6 1.7-6 4v2h12v-2c0-2.3-2.7-4-6-4z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Студенты</div>
+        <div class="card-desc">Управление аккаунтами, группами и доступом.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/admin/teachers">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l9 4.5-9 4.5L3 7.5 12 3zm-7 8l7 3.5 7-3.5V16l-7 3.5L5 16v-5z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Преподаватели</div>
+        <div class="card-desc">Создание преподавателей и выдача учетных данных.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/admin/groups">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 5h16v4H4V5zm0 6h10v8H4v-8zm12 0h4v8h-4v-8z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Группы и дисциплины</div>
+        <div class="card-desc">Связка групп, преподавателей и дисциплин.</div>
+      </div>
+    </div>
+  </a>
+  {% else %}
+  <a class="link-card card clickable" href="/login?next=/dashboard">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5zm0 13l-10-5v6l10 5 10-5v-6l-10 5z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Личный кабинет</div>
+        <div class="card-desc">Доступ к персональной аналитике и материалам.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/login?next=/student/tests">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9 2v2H5v14h14V9h2V2H9zM7 4h2v2H7V4zm10 12H9V8h8v8z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Результаты тестирования</div>
+        <div class="card-desc">Просмотр оценок и истории попыток.</div>
+      </div>
+    </div>
+  </a>
+  <a class="link-card card clickable" href="/login?next=/growth">
+    <div class="card-head">
+      <div class="card-icon" aria-hidden>
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zM4 20v-1c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4z"/></svg>
+      </div>
+      <div>
+        <div class="card-title">Точки роста</div>
+        <div class="card-desc">Рекомендации по улучшению успеваемости.</div>
+      </div>
+    </div>
+  </a>
+  {% endif %}
+</section>
+{% endblock %}

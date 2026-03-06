@@ -1,0 +1,115 @@
+﻿{% extends "base.html" %}
+{% block content %}
+{% set form = form_data if form_data else {} %}
+<div class="card narrow">
+  <h2>Регистрация студента</h2>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/register" class="auth-form">
+    <input type="hidden" name="role" value="student" />
+
+    <label>ФИО</label>
+    <input type="text" name="full_name" value="{{ form.get('full_name', '') }}" required />
+
+    <label>Логин</label>
+    <input type="text" name="login" value="{{ form.get('login', '') }}" required />
+
+    <label>Группа</label>
+    <input type="hidden" id="reg-student-group-value" name="student_group" value="{{ form.get('student_group', '') }}" />
+    <div class="custom-select" id="reg-group-select">
+      <button type="button" class="custom-select-trigger" aria-haspopup="listbox" aria-expanded="false">Выберите группу</button>
+      <div class="custom-select-menu" role="listbox" tabindex="-1">
+        <button type="button" class="custom-select-option" data-value="" role="option" aria-selected="false">Выберите группу</button>
+        {% for grp in available_groups|default([]) %}
+        <button type="button" class="custom-select-option" data-value="{{ grp }}" role="option" aria-selected="false">{{ grp }}</button>
+        {% endfor %}
+        {% if not available_groups %}
+        <button type="button" class="custom-select-option" data-value="" role="option" aria-selected="false" disabled>Нет доступных групп</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <label>Пароль</label>
+    <input type="password" name="password" required />
+    <button class="button" type="submit">Создать аккаунт</button>
+  </form>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var initCustomSelect = function (rootId, hiddenId, onChange) {
+      var root = document.getElementById(rootId);
+      var hidden = document.getElementById(hiddenId);
+      if (!root || !hidden) return null;
+
+      var trigger = root.querySelector('.custom-select-trigger');
+      var options = root.querySelectorAll('.custom-select-option');
+
+      var setValue = function (value, label) {
+        hidden.value = value;
+        trigger.textContent = label;
+        options.forEach(function (other) {
+          var selected = other.getAttribute('data-value') === value;
+          other.classList.toggle('is-selected', selected);
+          other.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        if (typeof onChange === 'function') onChange(value);
+      };
+
+      trigger.addEventListener('click', function () {
+        if (root.classList.contains('is-disabled')) return;
+        root.classList.toggle('open');
+        trigger.setAttribute('aria-expanded', root.classList.contains('open') ? 'true' : 'false');
+      });
+
+      options.forEach(function (option) {
+        option.addEventListener('click', function () {
+          var value = option.getAttribute('data-value') || '';
+          setValue(value, option.textContent);
+          root.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+        });
+      });
+
+      return {
+        root: root,
+        hidden: hidden,
+        setValue: setValue,
+        trigger: trigger,
+        options: options,
+      };
+    };
+
+    var groupSelect = initCustomSelect('reg-group-select', 'reg-student-group-value');
+    if (!groupSelect) return;
+
+    var initialValue = groupSelect.hidden.value || '';
+    var initialLabel = 'Выберите группу';
+    groupSelect.options.forEach(function (option) {
+      if ((option.getAttribute('data-value') || '') === initialValue) {
+        initialLabel = option.textContent;
+      }
+    });
+    groupSelect.setValue(initialValue, initialLabel);
+
+    document.addEventListener('click', function (event) {
+      var root = document.getElementById('reg-group-select');
+      if (!root) return;
+      if (!root.contains(event.target)) {
+        root.classList.remove('open');
+        var trigger = root.querySelector('.custom-select-trigger');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    var form = document.querySelector('.auth-form');
+    if (form) {
+      form.addEventListener('submit', function (event) {
+        if (!groupSelect.hidden.value) {
+          event.preventDefault();
+          groupSelect.root.classList.add('open');
+        }
+      });
+    }
+  });
+</script>
+{% endblock %}

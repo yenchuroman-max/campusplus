@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+{% set base_prefix = '/v1/admin' if request.url.path.startswith('/v1/admin') else '/admin' %}
+
+<div class="admin-groups-page">
+  <div class="admin-section-nav" style="margin-bottom:12px;">
+    <a class="tab-link" href="{{ base_prefix }}/students">Студенты</a>
+    <a class="tab-link" href="{{ base_prefix }}/teachers">Преподаватели</a>
+    <a class="tab-link" href="{{ base_prefix }}/groups">Группы</a>
+    <a class="tab-link active" href="{{ base_prefix }}/disciplines">Дисциплины</a>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="actions-inline" style="justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">{{ discipline.name }}</h2>
+      <a class="button secondary" href="{{ base_prefix }}/disciplines">Назад к списку</a>
+    </div>
+    <div class="muted" style="margin-top:10px;">Лекций: {{ discipline.lecture_count }} · Тестов: {{ discipline.test_count }}</div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Назначить преподавателя</div>
+    {% if available_teachers %}
+    <input id="teacher-search" type="text" placeholder="Поиск преподавателя" style="margin-top:10px; width:100%;">
+    <form method="post" action="{{ base_prefix }}/disciplines/{{ discipline.id }}/assign-teacher" class="inline-group-form" style="margin-top:10px;">
+      <select id="teacher-select" name="teacher_id" required>
+        {% for teacher in available_teachers %}
+        <option value="{{ teacher.id }}">{{ teacher.full_name }} (логин: {{ teacher.email }})</option>
+        {% endfor %}
+      </select>
+      <button class="button" type="submit">Назначить</button>
+    </form>
+    {% else %}
+    <div class="muted" style="margin-top:8px;">Все преподаватели уже назначены на эту дисциплину.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Назначенные преподаватели</div>
+    <div class="list" style="margin-top:10px;">
+      {% for teacher in assigned_teachers %}
+      <div class="card admin-card">
+        <div class="card-title">{{ teacher.full_name }}</div>
+        <div class="muted">Логин: {{ teacher.email }}</div>
+        <form method="post" action="{{ base_prefix }}/disciplines/{{ discipline.id }}/unassign-teacher" class="actions-inline" style="margin-top:8px;">
+          <input type="hidden" name="teacher_id" value="{{ teacher.id }}">
+          <button class="button danger" type="submit">Снять</button>
+        </form>
+      </div>
+      {% else %}
+      <div class="muted">Пока никто не назначен.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var searchInput = document.getElementById('teacher-search');
+    var teacherSelect = document.getElementById('teacher-select');
+    if (!searchInput || !teacherSelect) return;
+
+    var options = Array.prototype.slice.call(teacherSelect.options).map(function (option) {
+      return { value: option.value, text: option.text };
+    });
+
+    function renderOptions(query) {
+      teacherSelect.innerHTML = '';
+      var matched = options.filter(function (option) {
+        return option.text.toLowerCase().indexOf(query) !== -1;
+      });
+      matched.forEach(function (option) {
+        var el = document.createElement('option');
+        el.value = option.value;
+        el.textContent = option.text;
+        teacherSelect.appendChild(el);
+      });
+      teacherSelect.disabled = matched.length === 0;
+    }
+
+    searchInput.addEventListener('input', function () {
+      var query = (searchInput.value || '').trim().toLowerCase();
+      renderOptions(query);
+    });
+  })();
+</script>
+{% endblock %}

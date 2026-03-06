@@ -1,0 +1,35 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+<div class="card">
+  <div class="card-title">Студенты преподавателя</div>
+  {% if students %}
+    <div class="list" style="margin-top:10px;">
+      {% for s in students %}
+        <div class="card admin-card">
+          <div class="card-title">{{ s.full_name }}</div>
+          <div class="card-desc">Логин: {{ s.email }}</div>
+          <div class="muted">Группа: {{ s.student_group or 'Без группы' }}</div>
+          <div class="muted">Последний вход: {{ s.last_login }}</div>
+          <form method="post" action="/v2/teacher/students/{{ s.id }}/set_group?next=/v2/teacher/students" class="inline-group-form" style="margin-top:8px;">
+            <select name="student_group">
+              <option value="__none__">Без группы</option>
+              {% for g in available_groups %}
+                <option value="{{ g }}" {% if s.student_group == g %}selected{% endif %}>{{ g }}</option>
+              {% endfor %}
+            </select>
+            <button class="button secondary" type="submit">Переместить</button>
+          </form>
+          <div class="actions-inline" style="margin-top:8px;">
+            <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/edit">Редактировать</a>
+            <form method="post" action="/v2/teacher/students/{{ s.id }}/delete" onsubmit="return confirm('Удалить студента? Это действие необратимо.');" style="margin:0;">
+              <button class="button danger" type="submit">Удалить</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">Закрепленных студентов пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}

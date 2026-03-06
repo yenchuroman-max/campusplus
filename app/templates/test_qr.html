@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow">
+  <h2>QR-код для теста</h2>
+  <p><strong>{{ test.title }}</strong></p>
+  <p>Лекция: {{ test.lecture_title }}</p>
+  <p>Статус: {{ test.status }}</p>
+
+  <div style="display:flex; justify-content:center; margin:14px 0;">
+    <img src="{{ qr_image_url }}" alt="QR-код для перехода к тесту" width="320" height="320" />
+  </div>
+
+  <label>Ссылка для студентов</label>
+  <input id="test-entry-url" type="text" value="{{ entry_url }}" readonly />
+
+  <div class="actions" style="margin-top:10px;">
+    <button class="button secondary" type="button" id="copy-entry-link">Копировать ссылку</button>
+    <a class="button" href="/v2/teacher/tests">Назад к тестам</a>
+  </div>
+  <p id="copy-entry-status" class="muted" style="margin-top:8px;" aria-live="polite"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var input = document.getElementById('test-entry-url');
+    var btn = document.getElementById('copy-entry-link');
+    var status = document.getElementById('copy-entry-status');
+    if (!input || !btn || !status) return;
+
+    btn.addEventListener('click', function () {
+      input.select();
+      input.setSelectionRange(0, input.value.length);
+      navigator.clipboard.writeText(input.value)
+        .then(function () {
+          status.textContent = 'Ссылка скопирована.';
+        })
+        .catch(function () {
+          status.textContent = 'Не удалось скопировать автоматически. Скопируйте вручную.';
+        });
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,46 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<h2>Доступные тесты</h2>
+{% if student_disciplines %}
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Ваши дисциплины</div>
+    <div class="teachers-list" style="margin-top:8px;">
+      {% for d in student_disciplines %}
+        <a class="teacher-chip" href="/student/tests?discipline_id={{ d.id }}">{{ d.name }}</a>
+      {% endfor %}
+      <a class="teacher-chip" href="/student/tests">Все</a>
+    </div>
+  </div>
+{% endif %}
+
+{% if tests %}
+  <div class="list">
+    {% for test in tests %}
+      <div class="card">
+        <div class="card-head">
+          <div class="card-icon" aria-hidden>
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9 2v2H5v14h14V9h2V2H9zM7 4h2v2H7V4zm10 12H9V8h8v8z"/></svg>
+          </div>
+          <div>
+            <h3>{{ test.title }}</h3>
+            <p>Лекция: {{ test.lecture_title }}</p>
+            <p>Дисциплина: {{ test.discipline_name }}</p>
+          </div>
+        </div>
+        {% if test.is_completed %}
+          <div class="actions-inline" style="margin-top:10px;">
+            <span class="teacher-chip">Тест уже пройден</span>
+            <a class="button secondary" href="/student/attempts/{{ test.attempt_id }}">Разбор</a>
+          </div>
+        {% else %}
+          <div class="actions-inline" style="margin-top:10px;">
+            <a class="button" href="/student/tests/{{ test.id }}/take">Пройти</a>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p>Пока нет опубликованных тестов.</p>
+{% endif %}
+{% endblock %}

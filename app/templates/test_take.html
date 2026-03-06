@@ -1,0 +1,20 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>{{ test.title }}</h2>
+  <form method="post" action="/student/tests/{{ test.id }}/take">
+    {% for q in questions %}
+      <div class="question">
+        <p class="question-text"><strong>{{ loop.index }}.</strong> {{ q.text }}</p>
+        {% for opt in q.options %}
+          <label class="radio">
+            <input type="radio" name="q_{{ q.id }}" value="{{ loop.index0 }}" required />
+            <span class="option-text">{{ opt }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    {% endfor %}
+    <button class="button" type="submit">Отправить</button>
+  </form>
+</div>
+{% endblock %}

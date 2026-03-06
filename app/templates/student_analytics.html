@@ -1,0 +1,102 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<h2>Аналитика успеваемости</h2>
+{% if sparkline %}
+  <div class="card chart-card">
+    <h3>Динамика последних попыток</h3>
+    <svg viewBox="0 0 260 60" class="sparkline" role="img" aria-label="График успеваемости">
+      <polyline points="{{ sparkline }}" />
+    </svg>
+    <div class="sparkline-labels">
+      {% if spark_points %}
+        <span>Слева: {{ spark_points[0] }}</span>
+        <span>Справа: {{ spark_points[-1] }}</span>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+<div class="stats">
+  <div class="stat">
+    <span class="stat-label">Средний балл</span>
+    <span class="stat-value">{{ avg }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Динамика</span>
+    <span class="stat-value">
+      {% if trend > 0 %}+{{ trend }}{% else %}{{ trend }}{% endif %}
+    </span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Всего попыток</span>
+    <span class="stat-value">{{ total }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Лучший балл</span>
+    <span class="stat-value">{{ best }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Худший балл</span>
+    <span class="stat-value">{{ worst }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Средний за 7 дней</span>
+    <span class="stat-value">{{ last7 }}</span>
+  </div>
+</div>
+
+<h3>Последние попытки</h3>
+{% if recent %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Тест</th>
+          <th>Дата</th>
+          <th>Баллы</th>
+          <th>Разбор</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in recent %}
+          <tr>
+            <td>{{ item.test_title }}</td>
+            <td>{{ item.taken_at }}</td>
+            <td>{{ item.score }}</td>
+            <td><a href="/student/attempts/{{ item.attempt_id }}">Посмотреть ошибки</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>Пока нет данных.</p>
+{% endif %}
+
+<h3>Последний результат по каждому тесту</h3>
+{% if per_test %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Тест</th>
+          <th>Дата</th>
+          <th>Баллы</th>
+          <th>Разбор</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in per_test %}
+          <tr>
+            <td>{{ item.title }}</td>
+            <td>{{ item.taken_at }}</td>
+            <td>{{ item.score }}</td>
+            <td><a href="/student/attempts/{{ item.attempt_id }}">Посмотреть ошибки</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>Пока нет данных по тестам.</p>
+{% endif %}
+{% endblock %}

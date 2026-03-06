@@ -1,0 +1,139 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+{% if disciplines %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Дисциплина</div>
+  <form method="get" action="/v2/teacher/analytics" class="inline-group-form" style="margin-top:8px;">
+    <select name="discipline_id">
+      {% for d in disciplines %}
+        <option value="{{ d.id }}" {% if selected_discipline_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">Показать</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">Мониторинг усвоения материала группой</div>
+  <div class="card-desc">График показывает средний балл всех студентов, прошедших тесты в выбранной дисциплине.</div>
+
+  <div class="stats" style="margin-top:12px;">
+    <div class="stat">
+      <span class="stat-label">Средний балл</span>
+      <span class="stat-value">{{ overall_avg }}%</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Всего попыток</span>
+      <span class="stat-value">{{ total_attempts }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Студентов</span>
+      <span class="stat-value">{{ total_students }}</span>
+    </div>
+  </div>
+
+  {% if trend_svg %}
+  <div class="teacher-trend-chart" style="margin-top:14px;">
+    <svg viewBox="0 0 440 160" role="img" aria-label="Средний балл группы по попыткам">
+      <rect x="0" y="0" width="440" height="160" rx="12" fill="rgba(255,255,255,0.02)"></rect>
+      <polyline points="{{ trend_svg }}" fill="none" stroke="url(#teacherTrendGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      <defs>
+        <linearGradient id="teacherTrendGrad" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stop-color="#7a6cff"></stop>
+          <stop offset="100%" stop-color="#56d6ff"></stop>
+        </linearGradient>
+      </defs>
+    </svg>
+  </div>
+  <div class="sparkline-labels" style="margin-top:6px;">
+    {% if trend_values %}
+      <span>Начало: {{ trend_values[0] }}%</span>
+      <span>Текущее: {{ trend_values[-1] }}%</span>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:8px;">Недостаточно данных для графика.</p>
+  {% endif %}
+
+  {% if group_metrics %}
+  <div style="margin-top:14px;">
+    <h3>Средний балл по группам</h3>
+    <div class="table-wrap" style="margin-top:8px;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Группа</th>
+            <th>Попытки</th>
+            <th>Средний балл</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in group_metrics %}
+          <tr>
+            <td>{{ g.group }}</td>
+            <td>{{ g.attempts }}</td>
+            <td>{{ g.avg_score }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if metrics %}
+    <div style="margin-top:12px;">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Студент</th>
+              <th>Попытки</th>
+              <th>Средний балл</th>
+              <th>Прошли тест, %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in metrics %}
+            <tr>
+              <td>{{ m.name }}</td>
+              <td>{{ m.attempts }}</td>
+              <td>{{ m.avg_score }}</td>
+              <td>{{ m.pass_rate }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-bars" style="margin-top:14px;">
+      {% for m in metrics %}
+        <div class="bar-row">
+          <div class="bar-label">{{ m.name }}</div>
+          <div class="bar-track">
+            <div class="bar-fill" data-score="{{ m.avg_score }}"></div>
+          </div>
+          <div class="bar-value">{{ m.avg_score }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">Данных по успеваемости пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('.bar-fill[data-score]').forEach(function(el){
+      var score = Number(el.getAttribute('data-score') || '0');
+      if (!Number.isFinite(score)) score = 0;
+      score = Math.max(0, Math.min(100, score));
+      el.style.width = score + '%';
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+{% set base_prefix = '/v1/admin' if request.url.path.startswith('/v1/admin') else '/admin' %}
+
+<div class="admin-groups-page">
+  <div class="admin-section-nav" style="margin-bottom:12px;">
+    <a class="tab-link" href="{{ base_prefix }}/students">Студенты</a>
+    <a class="tab-link" href="{{ base_prefix }}/teachers">Преподаватели</a>
+    <a class="tab-link active" href="{{ base_prefix }}/groups">Группы</a>
+    <a class="tab-link" href="{{ base_prefix }}/disciplines">Дисциплины</a>
+  </div>
+
+  <h2>Группы</h2>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Создать группу</div>
+    <form method="post" action="{{ base_prefix }}/groups/create" class="inline-group-form create-group-form">
+      <input type="text" name="group_name" placeholder="Название группы" required>
+      <select name="teacher_id" required>
+        <option value="">Преподаватель</option>
+        {% for t in teachers %}
+          <option value="{{ t.id }}">{{ t.full_name }}</option>
+        {% endfor %}
+      </select>
+      <button class="button" type="submit">Создать группу</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Добавить пользователя в группу</div>
+    <form method="post" action="{{ base_prefix }}/groups/assign" class="inline-group-form assign-group-form">
+      <select name="student_id" required>
+        <option value="">Выберите студента</option>
+        {% for s in assign_students %}
+          <option value="{{ s.id }}">{{ s.full_name }}{% if s.student_group %} ({{ s.student_group }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <select name="student_group" required>
+        <option value="">Группа</option>
+        {% for g in managed_groups if g.name != 'Без группы' %}
+          <option value="{{ g.name }}">{{ g.name }}</option>
+        {% endfor %}
+        <option value="__none__">Без группы</option>
+      </select>
+      <button class="button" type="submit">Добавить</button>
+    </form>
+  </div>
+
+  <div class="groups-links" style="margin-bottom:14px;">
+    {% for g in managed_groups %}
+      <a class="group-link-card" href="{{ base_prefix }}/groups/{{ g.name.replace(' ', '_') }}">{{ g.name }}</a>
+    {% endfor %}
+  </div>
+
+  {% if selected_group %}
+  <div class="card" style="margin-bottom:12px;">
+    <h3 style="margin:0 0 8px 0;">Группа: {{ selected_group.name }}</h3>
+
+    {% if selected_group.name != 'Без группы' %}
+    <form method="post" action="{{ base_prefix }}/groups/{{ selected_group.name.replace(' ', '_') }}/teacher" class="inline-group-form create-group-form" style="margin-bottom:10px;">
+      <select name="teacher_id" required>
+        <option value="">Закрепить преподавателя</option>
+        {% for t in teachers %}
+          <option value="{{ t.id }}" {% if selected_group.teacher and selected_group.teacher.id == t.id %}selected{% endif %}>{{ t.full_name }}</option>
+        {% endfor %}
+      </select>
+      <button class="button secondary" type="submit">Сохранить преподавателя</button>
+    </form>
+    {% endif %}
+
+    <div class="card" style="margin-bottom:10px;">
+      <div class="card-title">Преподаватель группы</div>
+      {% if selected_group.teacher %}
+        <div class="teacher-chip" style="font-size:14px;">{{ selected_group.teacher.full_name }} · логин: {{ selected_group.teacher.email }}</div>
+      {% else %}
+        <div class="muted">Преподаватель не закреплён</div>
+      {% endif %}
+    </div>
+
+    <div class="card-title">Пользователи группы</div>
+    <div class="list">
+      {% for u in selected_group.members %}
+      <div class="card admin-card user-card">
+        <div class="card-head">
+          <div class="card-icon">{{ u.full_name[0]|upper }}</div>
+          <div style="flex:1; min-width:0;">
+            <div class="card-title">{{ u.full_name }}</div>
+            <div class="card-desc">Логин: {{ u.email }}</div>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="muted">Пользователей в группе нет.</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

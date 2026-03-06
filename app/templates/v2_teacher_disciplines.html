@@ -1,0 +1,40 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+<div class="card">
+  <div class="card-title">Мои дисциплины</div>
+  <form method="post" action="/v2/teacher/disciplines/create" class="inline-group-form" style="margin-top:10px; margin-bottom:10px;">
+    <input type="text" name="discipline_name" placeholder="Название новой дисциплины" required>
+    <button class="button" type="submit">Добавить дисциплину</button>
+  </form>
+  <form method="post" action="/v2/teacher/disciplines/attach" class="inline-group-form" style="margin-top:10px; margin-bottom:10px;">
+    <select name="discipline_id" required>
+      <option value="">Выберите существующую дисциплину</option>
+      {% for d in available_disciplines %}
+        <option value="{{ d.id }}">{{ d.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="button secondary" type="submit">Привязать к себе</button>
+  </form>
+  {% if disciplines %}
+    <div class="list" style="margin-top:10px;">
+      {% for d in disciplines %}
+        <div class="card admin-card">
+          <div class="card-title">{{ d.name }}</div>
+          <div class="muted">Лекций: {{ d.lecture_count }}</div>
+          <div class="muted">Тестов: {{ d.test_count }}</div>
+          <div class="muted">Закреплено студентов: {{ d.student_count }}</div>
+          <div class="actions-inline" style="margin-top:8px;">
+            <a class="button secondary" href="/v2/teacher/tests?discipline_id={{ d.id }}">Лекции и тесты</a>
+            <a class="button secondary" href="/v2/teacher/analytics?discipline_id={{ d.id }}">Аналитика</a>
+            <form method="post" action="/v2/teacher/disciplines/{{ d.id }}/detach" style="margin:0;">
+              <button class="button danger" type="submit" onclick="return confirm('Отвязать дисциплину от вашего профиля?');">Отвязать</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">Дисциплины не назначены. Обратитесь к администратору.</p>
+  {% endif %}
+</div>
+{% endblock %}

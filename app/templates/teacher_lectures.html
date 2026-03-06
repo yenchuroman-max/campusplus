@@ -1,0 +1,26 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <h2>Мои лекции</h2>
+  <a class="button" href="/teacher/lectures/new">Новая лекция</a>
+</div>
+{% if lectures %}
+  <div class="list">
+    {% for lecture in lectures %}
+      <div class="card">
+        <h3>{{ lecture.title }}</h3>
+        <p>Дисциплина: {{ lecture.discipline_name }}</p>
+        <p>Создано: {{ lecture.created_at }}</p>
+        <div class="actions-inline">
+          <a class="button secondary" href="/teacher/lectures/{{ lecture.id }}">Открыть</a>
+          <form method="post" action="/teacher/lectures/{{ lecture.id }}/delete" onsubmit="return confirm('Удалить лекцию и все связанные тесты?');" style="margin:0;">
+            <button class="button danger" type="submit">Удалить</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p>Пока нет лекций.</p>
+{% endif %}
+{% endblock %}

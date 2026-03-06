@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+{% set base_prefix = '/v1/admin' if request.url.path.startswith('/v1/admin') else ('/v1/teacher' if mode=='v1_teacher' else '/admin') %}
+
+<div class="admin-users-page">
+  {% if mode in ['admin', 'v1_admin'] %}
+  <div class="admin-section-nav" style="margin-bottom:12px;">
+    <a class="tab-link {% if page_kind == 'students' %}active{% endif %}" href="{{ base_prefix }}/students">Студенты</a>
+    <a class="tab-link {% if page_kind == 'teachers' %}active{% endif %}" href="{{ base_prefix }}/teachers">Преподаватели</a>
+    <a class="tab-link" href="{{ base_prefix }}/groups">Группы</a>
+    <a class="tab-link" href="{{ base_prefix }}/disciplines">Дисциплины</a>
+  </div>
+  {% endif %}
+
+  <h2>{{ page_title if page_title else 'Пользователи' }}</h2>
+
+  {% if mode in ['admin', 'v1_admin'] and page_kind == 'teachers' %}
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">Создать преподавателя</div>
+    <form method="post" action="{{ base_prefix }}/users/create" class="inline-group-form create-teacher-form">
+      <input type="text" name="full_name" placeholder="ФИО" required>
+      <input type="text" name="login" placeholder="Логин" required>
+      <input type="text" name="password" id="teacher-password-input" placeholder="Пароль" required>
+      <input type="hidden" name="role" value="teacher">
+      <button class="button secondary" type="button" id="generate-teacher-password">Сгенерировать пароль</button>
+      <button class="button" type="submit">Создать преподавателя</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <form method="get" class="user-search" style="margin-bottom:12px;">
+    <input id="user-search-input" type="search" name="q" placeholder="По фамилии..." value="{{ query if query is defined else request.query_params.get('q','') }}" />
+    <button class="button" type="submit">Найти</button>
+  </form>
+
+  <div class="card" style="margin-bottom:14px;">
+    <h3 style="margin:0 0 10px 0;">{{ page_title if page_title else 'Пользователи' }}</h3>
+    <div class="list">
+      {% for u in users %}
+      <div class="card admin-card user-card">
+        <div class="card-head">
+          <div class="card-icon">{{ u.full_name[0]|upper }}</div>
+          <div style="flex:1; min-width:0;">
+            <div class="card-title">{{ u.full_name }}</div>
+            <div class="card-desc">Логин: {{ u.email }}</div>
+          </div>
+        </div>
+        <div class="card-body">
+          {% if page_kind == 'students' %}
+          <div class="muted">Группа: {{ u.student_group if u.student_group else 'Без группы' }}</div>
+          {% else %}
+          <div class="muted">Роль: преподаватель</div>
+          {% endif %}
+          <div class="muted">Последний вход: {{ u.last_login }}</div>
+        </div>
+        <div class="card-footer actions-inline">
+          <a class="button secondary" href="{{ base_prefix }}/users/{{ u.id }}/edit">Редактировать</a>
+          {% if mode in ['admin', 'v1_admin'] and page_kind == 'students' %}
+          <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя? Это действие необратимо.');" style="margin:0;">
+            <button class="button danger" type="submit">Удалить</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">{{ 'Студентов не найдено.' if page_kind == 'students' else 'Преподавателей не найдено.' }}</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('generate-teacher-password');
+    var input = document.getElementById('teacher-password-input');
+    if (!btn || !input) return;
+
+    var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+    var makePassword = function (len) {
+      var out = '';
+      for (var i = 0; i < len; i++) {
+        out += alphabet[Math.floor(Math.random() * alphabet.length)];
+      }
+      return out;
+    };
+
+    btn.addEventListener('click', function () {
+      input.value = makePassword(12);
+      input.focus();
+      input.select();
+    });
+  });
+</script>
+{% endblock %}

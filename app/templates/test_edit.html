@@ -1,0 +1,29 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>{{ test.title }}</h2>
+  <p>Статус: {{ test.status }}</p>
+  <form method="post" action="/teacher/tests/{{ test.id }}/edit">
+    {% for q in questions %}
+      <div class="question">
+        <label>Вопрос {{ loop.index }}</label>
+        <input type="text" name="q_{{ q.id }}_text" value="{{ q.text }}" />
+        <div class="options">
+          {% for opt in q.options %}
+            <div class="option-row">
+              <input type="radio" name="q_{{ q.id }}_correct" value="{{ loop.index0 }}" {% if q.correct_index == loop.index0 %}checked{% endif %} />
+              <input type="text" name="q_{{ q.id }}_opt_{{ loop.index0 }}" value="{{ opt }}" />
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+    <button class="button" type="submit">Сохранить изменения</button>
+  </form>
+  {% if test.status != "published" %}
+    <form method="post" action="/teacher/tests/{{ test.id }}/publish">
+      <button class="button secondary" type="submit">Опубликовать</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

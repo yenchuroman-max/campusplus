@@ -1,0 +1,74 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<h2>Аналитика группы</h2>
+<div class="stats">
+  <div class="stat">
+    <span class="stat-label">Всего попыток</span>
+    <span class="stat-value">{{ total_attempts }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Уникальных студентов</span>
+    <span class="stat-value">{{ unique_students }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Средний балл</span>
+    <span class="stat-value">{{ overall_avg }}</span>
+  </div>
+</div>
+
+<h3>Тесты</h3>
+{% if per_test %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Тест</th>
+          <th>Попыток</th>
+          <th>Средний</th>
+          <th>Лучший</th>
+          <th>Худший</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in per_test %}
+          <tr>
+            <td>{{ t.title }}</td>
+            <td>{{ t.attempts }}</td>
+            <td>{{ t.avg }}</td>
+            <td>{{ t.best }}</td>
+            <td>{{ t.worst }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>Нет данных по тестам.</p>
+{% endif %}
+
+<h3>Студенты (средний балл)</h3>
+{% if student_avg %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Студент</th>
+          <th>Средний</th>
+          <th>Попыток</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in student_avg %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td>{{ s.avg }}</td>
+            <td>{{ s.attempts }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>Нет данных по студентам.</p>
+{% endif %}
+{% endblock %}

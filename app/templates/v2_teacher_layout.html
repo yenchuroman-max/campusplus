@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="teacher-v2-tabs">
+  <a class="tab-link {% if active_tab == 'disciplines' %}active{% endif %}" href="/v2/teacher/disciplines">Дисциплины</a>
+  <a class="tab-link {% if active_tab == 'tests' %}active{% endif %}" href="/v2/teacher/tests">Тесты</a>
+  <a class="tab-link {% if active_tab == 'students' %}active{% endif %}" href="/v2/teacher/students">Студенты</a>
+  <a class="tab-link {% if active_tab == 'analytics' %}active{% endif %}" href="/v2/teacher/analytics">Успеваемость</a>
+</div>
+
+{% block teacher_content %}{% endblock %}
+{% endblock %}

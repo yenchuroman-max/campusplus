@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <div class="toolbar">
+        <h2>Админ-панель</h2>
+        <form action="/v1/admin/logout" method="post" class="inline">
+          <button class="link-button" type="submit">Выйти</button>
+        </form>
+      </div>
+
+      <section class="grid">
+        <a class="link-card" href="/v1/admin/users">
+          <div class="card clickable">
+            <div class="card-title">Пользователи</div>
+            <div class="card-desc">Список всех пользователей и управление.</div>
+          </div>
+        </a>
+      </section>
+    </main>
+  </body>
+</html>
