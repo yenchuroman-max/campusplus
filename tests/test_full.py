@@ -382,6 +382,26 @@ class TestTeacherFlow:
         r = client.get("/teacher/lectures")
         assert r.status_code == 200
 
+    def test_lectures_grouped_by_discipline(self, client, db):
+        teacher_id = self._setup_teacher(client, db)
+        cur = db.cursor()
+        cur.execute("INSERT INTO disciplines (name) VALUES (?)", ("Algorithms",))
+        db.commit()
+        discipline_id = cur.lastrowid
+
+        lecture_id = _insert_lecture(db, teacher_id, title="Lecture A", discipline_id=discipline_id)
+        _insert_test(db, lecture_id, title="Test A")
+        _insert_lecture(db, teacher_id, title="Lecture B", discipline_id=discipline_id)
+
+        r = client.get(f"/teacher/lectures?discipline_id={discipline_id}")
+        assert r.status_code == 200
+        body = r.text
+        assert "Algorithms" in body
+        assert "Лекции дисциплины" in body
+        assert "Тесты дисциплины" in body
+        assert "Lecture A" in body
+        assert "Test A" in body
+
     def test_new_lecture_page(self, client, db):
         self._setup_teacher(client, db)
         r = client.get("/teacher/lectures/new")

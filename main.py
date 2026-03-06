@@ -1243,21 +1243,147 @@ def teacher_lectures(request: Request):
     user = get_current_user(request)
     if not user or (user["role"] != "teacher" and user["role"] != "admin"):
         return RedirectResponse("/login", status_code=302)
+
+    discipline_filter_raw = (request.query_params.get("discipline_id") or "").strip()
+    discipline_filter: int | None = None
+    if discipline_filter_raw:
+        try:
+            discipline_filter = int(discipline_filter_raw)
+        except Exception:
+            discipline_filter = None
+
     conn = connect()
     cur = conn.cursor()
     disciplines = get_discipline_map(cur)
-    # teacher sees own lectures; admin sees all
+
+    grouped: dict[int, dict[str, Any]] = {}
+
+    def ensure_group(discipline_key: int, discipline_name: str) -> dict[str, Any]:
+        safe_name = (discipline_name or "").strip() or "Без дисциплины"
+        if discipline_key not in grouped:
+            grouped[discipline_key] = {
+                "discipline_key": discipline_key,
+                "discipline_id": discipline_key if discipline_key > 0 else None,
+                "discipline_name": safe_name,
+                "lectures": [],
+                "tests": [],
+                "lecture_count": 0,
+                "test_count": 0,
+            }
+        return grouped[discipline_key]
+
+    # teacher sees only own lectures/tests; admin sees all
     if user["role"] == "teacher":
-        cur.execute("SELECT * FROM lectures WHERE teacher_id = ? ORDER BY id DESC", (user["id"],))
+        cur.execute(
+            """
+            SELECT
+                l.*,
+                COALESCE(l.discipline_id, 0) AS discipline_key,
+                COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM lectures l
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            WHERE l.teacher_id = ?
+            ORDER BY COALESCE(d.name, 'Без дисциплины'), l.id DESC
+            """,
+            (user["id"],),
+        )
     else:
-        cur.execute("SELECT * FROM lectures ORDER BY id DESC")
+        cur.execute(
+            """
+            SELECT
+                l.*,
+                COALESCE(l.discipline_id, 0) AS discipline_key,
+                COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM lectures l
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            ORDER BY COALESCE(d.name, 'Без дисциплины'), l.id DESC
+            """
+        )
+
     lectures = []
     for row in cur.fetchall():
         lecture = dict(row)
-        lecture["discipline_name"] = disciplines.get(int(lecture.get("discipline_id") or 0), "Без дисциплины")
+        discipline_key = int(lecture.get("discipline_key") or lecture.get("discipline_id") or 0)
+        discipline_name = lecture.get("discipline_name") or disciplines.get(discipline_key, "Без дисциплины")
+        lecture["discipline_name"] = discipline_name
         lectures.append(lecture)
+        ensure_group(discipline_key, discipline_name)["lectures"].append(lecture)
+
+    if user["role"] == "teacher":
+        cur.execute(
+            """
+            SELECT
+                t.id,
+                t.title,
+                t.status,
+                t.created_at,
+                t.lecture_id,
+                l.title AS lecture_title,
+                COALESCE(l.discipline_id, 0) AS discipline_key,
+                COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM tests t
+            JOIN lectures l ON l.id = t.lecture_id
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            WHERE l.teacher_id = ?
+            ORDER BY COALESCE(d.name, 'Без дисциплины'), t.id DESC
+            """,
+            (user["id"],),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT
+                t.id,
+                t.title,
+                t.status,
+                t.created_at,
+                t.lecture_id,
+                l.title AS lecture_title,
+                COALESCE(l.discipline_id, 0) AS discipline_key,
+                COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM tests t
+            JOIN lectures l ON l.id = t.lecture_id
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            ORDER BY COALESCE(d.name, 'Без дисциплины'), t.id DESC
+            """
+        )
+
+    tests = []
+    for row in cur.fetchall():
+        test = dict(row)
+        discipline_key = int(test.get("discipline_key") or 0)
+        discipline_name = test.get("discipline_name") or disciplines.get(discipline_key, "Без дисциплины")
+        tests.append(test)
+        ensure_group(discipline_key, discipline_name)["tests"].append(test)
+
+    grouped_disciplines = sorted(
+        grouped.values(),
+        key=lambda item: (1 if int(item.get("discipline_key") or 0) == 0 else 0, str(item.get("discipline_name") or "").lower()),
+    )
+    for item in grouped_disciplines:
+        item["lectures"].sort(key=lambda lecture: int(lecture.get("id") or 0), reverse=True)
+        item["tests"].sort(key=lambda test: int(test.get("id") or 0), reverse=True)
+        item["lecture_count"] = len(item["lectures"])
+        item["test_count"] = len(item["tests"])
+
+    selected_discipline_key: int | None = None
+    available_keys = {int(item.get("discipline_key") or 0) for item in grouped_disciplines}
+    if discipline_filter is not None and discipline_filter in available_keys:
+        selected_discipline_key = discipline_filter
+    elif grouped_disciplines:
+        selected_discipline_key = int(grouped_disciplines[0].get("discipline_key") or 0)
+
     conn.close()
-    return render(request, "teacher_lectures.html", {"lectures": lectures})
+    return render(
+        request,
+        "teacher_lectures.html",
+        {
+            "lectures": lectures,
+            "tests": tests,
+            "grouped_disciplines": grouped_disciplines,
+            "selected_discipline_key": selected_discipline_key,
+        },
+    )
 
 
 @app.get("/teacher/lectures/new", response_class=HTMLResponse)

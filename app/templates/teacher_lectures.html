@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <div class="toolbar">
   <h2>Мои лекции</h2>
@@ -7,24 +7,102 @@
     <a class="button secondary" href="/teacher/tests/manual/new">Ручной тест</a>
   </div>
 </div>
-{% if lectures %}
-  <div class="list">
-    {% for lecture in lectures %}
-      <div class="card">
-        <h3>{{ lecture.title }}</h3>
-        <p>Дисциплина: {{ lecture.discipline_name }}</p>
-        <p>Создано: {{ lecture.created_at }}</p>
-        <div class="actions-inline">
-          <a class="button secondary" href="/teacher/lectures/{{ lecture.id }}">Открыть</a>
-          <a class="button secondary" href="/teacher/tests/manual/new?lecture_id={{ lecture.id }}">Ручной тест</a>
-          <form method="post" action="/teacher/lectures/{{ lecture.id }}/delete" onsubmit="return confirm('Удалить лекцию и все связанные тесты?');" style="margin:0;">
-            <button class="button danger" type="submit">Удалить</button>
-          </form>
+
+{% if grouped_disciplines %}
+  <div class="admin-student-groups teacher-lectures-by-discipline">
+    {% for item in grouped_disciplines %}
+      {% set open_group = selected_discipline_key == item.discipline_key %}
+      <section class="card group-column teacher-discipline-group {% if open_group %}open{% endif %}" id="discipline-{{ item.discipline_key }}">
+        <button
+          type="button"
+          class="group-toggle"
+          data-teacher-discipline-toggle
+          aria-expanded="{{ 'true' if open_group else 'false' }}"
+          aria-controls="teacher-discipline-{{ loop.index }}"
+        >
+          <span class="group-arrow" aria-hidden="true">›</span>
+          <span class="admin-student-group-title">{{ item.discipline_name }}</span>
+          <span class="muted" style="margin-left:auto;">Лекций: {{ item.lecture_count }} · Тестов: {{ item.test_count }}</span>
+        </button>
+
+        <div class="group-members admin-student-group-members" id="teacher-discipline-{{ loop.index }}">
+          <div class="actions-inline" style="margin-top:0; margin-bottom:10px;">
+            <a class="button secondary" href="/teacher/lectures?discipline_id={{ item.discipline_key }}#discipline-{{ item.discipline_key }}">Лекции</a>
+            {% if current_user and current_user.role == 'teacher' and item.discipline_id %}
+              <a class="button secondary" href="/v2/teacher/tests?discipline_id={{ item.discipline_id }}">Тесты</a>
+            {% elif current_user and current_user.role == 'teacher' %}
+              <a class="button secondary" href="/v2/teacher/tests">Тесты</a>
+            {% endif %}
+          </div>
+
+          <div class="card" style="margin-bottom:10px;">
+            <div class="card-title">Лекции дисциплины</div>
+            {% if item.lectures %}
+              <div class="list" style="margin-top:10px;">
+                {% for lecture in item.lectures %}
+                  <div class="card admin-card">
+                    <div class="card-title">{{ lecture.title }}</div>
+                    <div class="muted">Создано: {{ lecture.created_at }}</div>
+                    <div class="actions-inline">
+                      <a class="button secondary" href="/teacher/lectures/{{ lecture.id }}">Открыть лекцию</a>
+                      <a class="button secondary" href="/teacher/tests/manual/new?lecture_id={{ lecture.id }}">Ручной тест</a>
+                      <form method="post" action="/teacher/lectures/{{ lecture.id }}/delete" onsubmit="return confirm('Удалить лекцию и все связанные тесты?');" style="margin:0;">
+                        <button class="button danger" type="submit">Удалить</button>
+                      </form>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="muted" style="margin-top:8px;">В этой дисциплине пока нет лекций.</p>
+            {% endif %}
+          </div>
+
+          <div class="card">
+            <div class="card-title">Тесты дисциплины</div>
+            {% if item.tests %}
+              <div class="list" style="margin-top:10px;">
+                {% for test in item.tests %}
+                  <div class="card admin-card">
+                    <div class="card-title">{{ test.title }}</div>
+                    <div class="muted">Лекция: {{ test.lecture_title }}</div>
+                    <div class="muted">Статус: {{ test.status }}</div>
+                    <div class="muted">Создан: {{ test.created_at }}</div>
+                    <div class="actions-inline">
+                      <a class="button secondary" href="/teacher/tests/{{ test.id }}/edit">Редактировать</a>
+                      <a class="button secondary" href="/teacher/tests/{{ test.id }}/qr">QR-код</a>
+                      <form method="post" action="/teacher/tests/{{ test.id }}/delete" onsubmit="return confirm('Удалить тест? Это действие необратимо.');" style="margin:0;">
+                        <button class="button danger" type="submit">Удалить</button>
+                      </form>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="muted" style="margin-top:8px;">В этой дисциплине пока нет тестов.</p>
+            {% endif %}
+          </div>
         </div>
-      </div>
+      </section>
     {% endfor %}
   </div>
 {% else %}
   <p>Пока нет лекций.</p>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-teacher-discipline-toggle]');
+    toggles.forEach(function (toggle) {
+      toggle.addEventListener('click', function () {
+        var container = toggle.closest('.group-column');
+        if (!container) return;
+        var opened = container.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', opened ? 'true' : 'false');
+      });
+    });
+  });
+</script>
 {% endblock %}
