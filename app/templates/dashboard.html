@@ -110,7 +110,11 @@
                 <td>{{ item.test_title }}</td>
                 <td>{{ item.taken_at }}</td>
                 <td>{{ item.score }}</td>
-                <td><a href="/student/attempts/{{ item.attempt_id }}">Ошибки</a></td>
+                <td>
+                  <a href="/student/attempts/{{ item.attempt_id }}">
+                    {% if item.score|float >= 100 %}Разбор (без ошибок){% else %}Ошибки{% endif %}
+                  </a>
+                </td>
               </tr>
             {% endfor %}
           </tbody>

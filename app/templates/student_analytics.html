@@ -62,7 +62,11 @@
             <td>{{ item.test_title }}</td>
             <td>{{ item.taken_at }}</td>
             <td>{{ item.score }}</td>
-            <td><a href="/student/attempts/{{ item.attempt_id }}">Посмотреть ошибки</a></td>
+            <td>
+              <a href="/student/attempts/{{ item.attempt_id }}">
+                {% if item.score|float >= 100 %}Разбор (без ошибок){% else %}Посмотреть ошибки{% endif %}
+              </a>
+            </td>
           </tr>
         {% endfor %}
       </tbody>
@@ -90,7 +94,11 @@
             <td>{{ item.title }}</td>
             <td>{{ item.taken_at }}</td>
             <td>{{ item.score }}</td>
-            <td><a href="/student/attempts/{{ item.attempt_id }}">Посмотреть ошибки</a></td>
+            <td>
+              <a href="/student/attempts/{{ item.attempt_id }}">
+                {% if item.score|float >= 100 %}Разбор (без ошибок){% else %}Посмотреть ошибки{% endif %}
+              </a>
+            </td>
           </tr>
         {% endfor %}
       </tbody>
