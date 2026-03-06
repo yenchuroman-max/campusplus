@@ -19,7 +19,16 @@
     </script>
     <link rel="stylesheet" href="/static/css/styles.css" />
   </head>
-  <body class="route-{{ request.url.path.strip('/').replace('/', '-') if request.url.path != '/' else 'home' }}">
+  {% set route_class = request.url.path.strip('/').replace('/', '-') if request.url.path != '/' else 'home' %}
+  {% set layout_class = 'layout-guest' %}
+  {% if request.session.admin_authenticated or (current_user and current_user.role == 'admin') %}
+    {% set layout_class = 'layout-admin' %}
+  {% elif current_user and current_user.role == 'teacher' %}
+    {% set layout_class = 'layout-teacher' %}
+  {% elif current_user and current_user.role == 'student' %}
+    {% set layout_class = 'layout-student' %}
+  {% endif %}
+  <body class="route-{{ route_class }} {{ layout_class }}">
     <header class="site-header">
       <div class="container header-shell">
         <a href="/" class="brand brand-with-logo" aria-label="КампусПлюс СГУГиТ">

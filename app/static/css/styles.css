@@ -459,6 +459,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
 
 /* Stable desktop header for admin/teacher pages: logo stays fixed, search goes to row 2 */
 @media (min-width: 901px) {
+  body.layout-admin .header-shell,
+  body.layout-teacher .header-shell,
   body[class*="route-admin-"] .header-shell,
   body[class*="route-v1-admin-"] .header-shell,
   body[class*="route-v2-admin-"] .header-shell,
@@ -470,6 +472,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
     column-gap: var(--sp-3);
   }
 
+  body.layout-admin .brand,
+  body.layout-teacher .brand,
   body[class*="route-admin-"] .brand,
   body[class*="route-v1-admin-"] .brand,
   body[class*="route-v2-admin-"] .brand,
@@ -481,6 +485,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
     max-width: 340px;
   }
 
+  body.layout-admin .nav,
+  body.layout-teacher .nav,
   body[class*="route-admin-"] .nav,
   body[class*="route-v1-admin-"] .nav,
   body[class*="route-v2-admin-"] .nav,
@@ -497,6 +503,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
     scrollbar-width: none;
   }
 
+  body.layout-admin .nav::-webkit-scrollbar,
+  body.layout-teacher .nav::-webkit-scrollbar,
   body[class*="route-admin-"] .nav::-webkit-scrollbar,
   body[class*="route-v1-admin-"] .nav::-webkit-scrollbar,
   body[class*="route-v2-admin-"] .nav::-webkit-scrollbar,
@@ -506,6 +514,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
     display: none;
   }
 
+  body.layout-admin .theme-toggle,
+  body.layout-teacher .theme-toggle,
   body[class*="route-admin-"] .theme-toggle,
   body[class*="route-v1-admin-"] .theme-toggle,
   body[class*="route-v2-admin-"] .theme-toggle,
@@ -516,6 +526,8 @@ main.container > *:nth-child(4) { animation-delay: 220ms; }
     margin-left: 0;
   }
 
+  body.layout-admin .header-search,
+  body.layout-teacher .header-search,
   body[class*="route-admin-"] .header-search,
   body[class*="route-v1-admin-"] .header-search,
   body[class*="route-v2-admin-"] .header-search,
