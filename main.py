@@ -583,6 +583,35 @@ BASE_DIR = Path(__file__).resolve().parent
 if load_dotenv:
     load_dotenv(BASE_DIR / ".env")
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _session_cookie_settings() -> tuple[bool, str, int]:
+    # In production mobile webviews are more stable with SameSite=None + Secure.
+    # Keep local defaults friendly for HTTP dev unless overridden by env.
+    running_on_render = bool((os.getenv("RENDER") or "").strip())
+    secure_cookie = _env_bool("SESSION_COOKIE_SECURE", running_on_render)
+
+    same_site = (os.getenv("SESSION_COOKIE_SAMESITE") or "").strip().lower()
+    if same_site not in {"lax", "strict", "none"}:
+        same_site = "none" if secure_cookie else "lax"
+
+    if same_site == "none":
+        secure_cookie = True
+
+    try:
+        max_age = int((os.getenv("SESSION_COOKIE_MAX_AGE") or "").strip() or str(60 * 60 * 24 * 30))
+    except Exception:
+        max_age = 60 * 60 * 24 * 30
+
+    return secure_cookie, same_site, max_age
+
+
 app = FastAPI(
     title="КампусПлюс СГУГиТ — API",
     description=(
@@ -595,7 +624,14 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 _session_secret = os.environ.get("SESSION_SECRET_KEY") or os.environ.get("SECRET_KEY") or "dev-secret-change-me"
-app.add_middleware(SessionMiddleware, secret_key=_session_secret)
+_session_cookie_secure, _session_cookie_samesite, _session_cookie_max_age = _session_cookie_settings()
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret,
+    same_site=_session_cookie_samesite,
+    https_only=_session_cookie_secure,
+    max_age=_session_cookie_max_age,
+)
 
 # ── JSON API (виден в /docs) ────────────────────────────────────
 from app.api import router as api_router  # noqa: E402
@@ -1053,28 +1089,20 @@ def login(
     if row["role"] == "admin":
         request.session["admin_authenticated"] = True
         request.session["admin_email"] = row["email"]
-        resp = RedirectResponse("/admin/students", status_code=302)
-        resp.set_cookie("start_session", "admin", httponly=True, samesite="lax")
-        return resp
+        return RedirectResponse("/admin/students", status_code=302)
     if row["role"] == "teacher" and (not next or next == ""):
-        resp = RedirectResponse("/v2/teacher", status_code=302)
-        resp.set_cookie("start_session", "teacher", httponly=True, samesite="lax")
-        return resp
+        return RedirectResponse("/v2/teacher", status_code=302)
     # redirect to requested path if safe
     redirect_to = "/dashboard"
     if next and isinstance(next, str) and next.startswith("/"):
         redirect_to = next
-    resp = RedirectResponse(redirect_to, status_code=302)
-    resp.set_cookie("start_session", row["role"], httponly=True, samesite="lax")
-    return resp
+    return RedirectResponse(redirect_to, status_code=302)
 
 
 @app.post("/logout")
 def logout(request: Request):
     request.session.clear()
-    resp = RedirectResponse("/", status_code=302)
-    resp.delete_cookie("start_session")
-    return resp
+    return RedirectResponse("/", status_code=302)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -3165,9 +3193,7 @@ def v2_admin_login(
     request.session["user_id"] = row["id"]
     request.session["admin_authenticated"] = True
     request.session["admin_email"] = row["email"]
-    resp = RedirectResponse("/admin/students", status_code=302)
-    resp.set_cookie("start_session", "admin", httponly=True, samesite="lax")
-    return resp
+    return RedirectResponse("/admin/students", status_code=302)
 
 
 @app.post("/v1/admin/logout")
@@ -3175,9 +3201,7 @@ def v1_admin_logout(request: Request):
     request.session.pop("user_id", None)
     request.session.pop("admin_authenticated", None)
     request.session.pop("admin_email", None)
-    resp = RedirectResponse("/v2/admin", status_code=302)
-    resp.delete_cookie("start_session")
-    return resp
+    return RedirectResponse("/v2/admin", status_code=302)
 
 
 @app.get("/v1/admin/dashboard", response_class=HTMLResponse)
