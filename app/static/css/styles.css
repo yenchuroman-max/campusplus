@@ -768,6 +768,11 @@ body.nav-open .nav-toggle-line:nth-child(3) { transform: translateY(-6px) rotate
   color: inherit;
   display: block;
 }
+.link-card:hover,
+.link-card:focus-visible,
+.link-card:active {
+  color: inherit;
+}
 .link-card.card {
   display: flex;
   flex-direction: column;
@@ -1669,6 +1674,19 @@ input[type="file"]::file-selector-button {
   display: inline-flex;
   align-items: center;
   margin: 0;
+}
+
+.tests-create-card .card-desc {
+  margin-bottom: var(--sp-2);
+}
+
+.tests-create-actions {
+  margin-top: var(--sp-2);
+  row-gap: var(--sp-2);
+}
+
+.tests-create-actions .button {
+  flex: 0 0 auto;
 }
 
 .toolbar {
