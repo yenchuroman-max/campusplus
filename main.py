@@ -2489,14 +2489,15 @@ def admin_group(request: Request, group_name: str):
     return render(request, "admin_groups.html", {"mode": "admin", **context})
 # --- Separate admin panel (v1) with its own simple auth ---
 def admin_panel_auth(request: Request) -> bool:
-    # require both admin session flag and start_session cookie
-    return bool(request.session.get("admin_authenticated") and request.cookies.get("start_session"))
+    # Auth must rely on signed server session only.
+    # Auxiliary cookies can be dropped by browsers/proxies and should not force logout.
+    return bool(request.session.get("admin_authenticated"))
 
 
 def ensure_start_session_cookie(request: Request) -> None:
-    from fastapi import HTTPException
-    if not request.cookies.get("start_session"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    # Backward-compatible no-op: keep calls in handlers, but do not enforce
+    # auxiliary cookie presence. Real access control is done via get_current_user().
+    return None
 
 
 @app.get("/v1/admin", response_class=HTMLResponse)
