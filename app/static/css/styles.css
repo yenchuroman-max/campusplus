@@ -1698,6 +1698,8 @@ input[type="file"]::file-selector-button {
 .create-group-form   { grid-template-columns: minmax(200px, 1.2fr) minmax(200px, 1fr) auto; }
 .assign-group-form   { grid-template-columns: minmax(240px, 1.2fr) minmax(200px, 1fr) auto; }
 .create-teacher-form { grid-template-columns: repeat(3, minmax(180px, 1fr)) auto auto; }
+.profile-name-form   { grid-template-columns: minmax(220px, 1fr) auto; }
+.profile-password-form { grid-template-columns: repeat(3, minmax(180px, 1fr)) auto; }
 
 .group-change-row { margin: var(--sp-2) 0 var(--sp-3); }
 

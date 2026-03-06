@@ -99,9 +99,7 @@
               <a href="/admin/groups" class="link-button nav-link icon-groups">Группы</a>
               <a href="/admin/disciplines" class="link-button nav-link icon-disciplines">Дисциплины</a>
             {% endif %}
-            {% if current_user.role != 'admin' %}
-              <a href="/dashboard" class="link-button nav-link icon-dashboard">Личный кабинет</a>
-            {% endif %}
+            <a href="/dashboard" class="link-button nav-link icon-dashboard">Личный кабинет</a>
             <form action="/logout" method="post" class="inline">
               <button class="link-button nav-link icon-logout" type="submit">Выйти</button>
             </form>

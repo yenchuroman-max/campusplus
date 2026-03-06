@@ -1164,6 +1164,79 @@ def dashboard(request: Request):
     return render(request, "dashboard.html", context)
 
 
+@app.post("/dashboard/profile/name")
+def dashboard_update_full_name(
+    request: Request,
+    full_name: str = Form(...),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+
+    clean_name = sanitize_full_name(full_name)
+    if not clean_name:
+        add_flash(request, "Укажите корректное ФИО.", "error")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    old_name = (user.get("full_name") or "").strip()
+    if clean_name == old_name:
+        add_flash(request, "ФИО не изменилось.", "info")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET full_name = ? WHERE id = ?", (clean_name, user["id"]))
+    conn.commit()
+    conn.close()
+
+    audit_log(request, "self_update_full_name", target_user_id=user["id"], details=f"{old_name} -> {clean_name}")
+    add_flash(request, "ФИО обновлено.", "success")
+    return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+
+@app.post("/dashboard/profile/password")
+def dashboard_update_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    new_password_confirm: str = Form(...),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+
+    if not verify_password(current_password, user["salt"], user["password_hash"]):
+        add_flash(request, "Текущий пароль указан неверно.", "error")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    if new_password != new_password_confirm:
+        add_flash(request, "Новый пароль и подтверждение не совпадают.", "error")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    ok, err = validate_password(new_password)
+    if not ok:
+        add_flash(request, err, "error")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    if verify_password(new_password, user["salt"], user["password_hash"]):
+        add_flash(request, "Новый пароль должен отличаться от текущего.", "error")
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+    salt = new_salt()
+    password_hash = hash_password(new_password, salt)
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (password_hash, salt, user["id"]))
+    conn.commit()
+    conn.close()
+
+    audit_log(request, "self_update_password", target_user_id=user["id"], details="password changed in dashboard")
+    add_flash(request, "Пароль успешно обновлен.", "success")
+    return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+
 @app.get("/teacher/lectures", response_class=HTMLResponse)
 def teacher_lectures(request: Request):
     ensure_start_session_cookie(request)

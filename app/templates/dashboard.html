@@ -3,6 +3,25 @@
 <h2>Личный кабинет</h2>
 <p>Здравствуйте, {{ current_user.full_name }}</p>
 
+<div class="card profile-settings-card" id="profile-settings" style="margin-top:14px;">
+  <h3>Настройки профиля</h3>
+  <p class="muted">Изменение ФИО и пароля для текущей учетной записи.</p>
+
+  <form method="post" action="/dashboard/profile/name" class="inline-group-form profile-name-form" style="margin-top:10px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="text" name="full_name" value="{{ current_user.full_name }}" placeholder="ФИО" required />
+    <button class="button" type="submit">Сохранить ФИО</button>
+  </form>
+
+  <form method="post" action="/dashboard/profile/password" class="inline-group-form profile-password-form" style="margin-top:10px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="password" name="current_password" placeholder="Текущий пароль" required />
+    <input type="password" name="new_password" placeholder="Новый пароль" required />
+    <input type="password" name="new_password_confirm" placeholder="Повторите новый пароль" required />
+    <button class="button secondary" type="submit">Обновить пароль</button>
+  </form>
+</div>
+
 {% if current_user.role == "teacher" %}
   {% if teacher_summary %}
   <div class="stats">

@@ -278,6 +278,67 @@ class TestAuth:
         assert r.status_code == 302
         assert "/" == r.headers.get("location", "").rstrip("/") or r.headers.get("location", "") == "/"
 
+    @pytest.mark.parametrize(
+        "role, login, password, initial_name, updated_name",
+        [
+            ("student", "profile_student@test.ru", "pass123", "Student Profile", "Student Profile Updated"),
+            ("teacher", "profile_teacher@test.ru", "pass123", "Teacher Profile", "Teacher Profile Updated"),
+            ("admin", "admin@test.ru", "admin123", "Admin", "Admin Profile Updated"),
+        ],
+    )
+    def test_dashboard_profile_full_name_update_for_any_role(
+        self,
+        client,
+        db,
+        role,
+        login,
+        password,
+        initial_name,
+        updated_name,
+    ):
+        if role == "admin":
+            _create_admin(db)
+            _login_admin(client)
+        else:
+            _insert_user(db, role=role, login=login, password=password, full_name=initial_name)
+            _login(client, email=login, password=password)
+
+        r = client.post(
+            "/dashboard/profile/name",
+            data={"full_name": updated_name},
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+        assert "/dashboard" in r.headers.get("location", "")
+
+        cur = db.cursor()
+        cur.execute("SELECT full_name FROM users WHERE email = ?", (login,))
+        row = cur.fetchone()
+        assert row is not None
+        assert row["full_name"] == updated_name
+
+    def test_dashboard_profile_password_update(self, client, db):
+        _insert_user(db, role="teacher", login="pwd_teacher@test.ru", password="pass123", full_name="Password Teacher")
+        _login(client, email="pwd_teacher@test.ru", password="pass123")
+
+        r = client.post(
+            "/dashboard/profile/password",
+            data={
+                "current_password": "pass123",
+                "new_password": "newpass123",
+                "new_password_confirm": "newpass123",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+        assert "/dashboard" in r.headers.get("location", "")
+
+        client.post("/logout", follow_redirects=False)
+        wrong_old = _login(client, email="pwd_teacher@test.ru", password="pass123")
+        assert wrong_old.status_code == 200
+        ok_new = _login(client, email="pwd_teacher@test.ru", password="newpass123")
+        assert ok_new.status_code == 302
+
 
 # ═══════════════════════════════════════════════════════════════
 # 3. СТРАНИЦЫ (GET — без авторизации)
