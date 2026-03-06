@@ -636,9 +636,51 @@ def make_sparkline(points: list[float], width: int = 260, height: int = 60) -> s
     return " ".join(coords)
 
 
+def ensure_bootstrap_admin() -> None:
+    bootstrap_login = (os.getenv("BOOTSTRAP_ADMIN_LOGIN") or os.getenv("BOOTSTRAP_ADMIN_EMAIL") or "").strip()
+    bootstrap_password = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+    bootstrap_full_name = (os.getenv("BOOTSTRAP_ADMIN_FULL_NAME") or "Администратор").strip() or "Администратор"
+
+    if not bootstrap_login or not bootstrap_password:
+        return
+
+    clean_login = validate_login(bootstrap_login)
+    if not clean_login:
+        return
+
+    pw_ok, _ = validate_password(bootstrap_password)
+    if not pw_ok:
+        return
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM users WHERE email = ?", (clean_login,))
+    existing = cur.fetchone()
+    if existing:
+        cur.execute(
+            "UPDATE users SET role = 'admin', full_name = ? WHERE id = ?",
+            (bootstrap_full_name, existing["id"]),
+        )
+    else:
+        salt = new_salt()
+        cur.execute(
+            "INSERT INTO users (role, full_name, email, password_hash, salt) VALUES (?, ?, ?, ?, ?)",
+            (
+                "admin",
+                bootstrap_full_name,
+                clean_login,
+                hash_password(bootstrap_password, salt),
+                salt,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    ensure_bootstrap_admin()
 
 
 @app.get("/", response_class=HTMLResponse)
