@@ -2,6 +2,9 @@
 {% block content %}
 <div class="card narrow">
   <h2>Вход</h2>
+  {% if next and '/student/tests/' in next %}
+  <div class="alert">Чтобы пройти тест, войдите или зарегистрируйтесь.</div>
+  {% endif %}
   {% if error %}<div class="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/login" class="auth-form">
     <label>Логин</label>
@@ -10,6 +13,7 @@
     <input type="password" name="password" required />
     <input type="hidden" name="next" value="{{ next if next else '' }}" />
     <button class="button" type="submit">Войти</button>
+    <a class="button secondary" href="/register{% if next %}?next={{ next }}{% endif %}">Зарегистрироваться</a>
   </form>
 </div>
 {% endblock %}

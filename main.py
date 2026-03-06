@@ -677,6 +677,16 @@ def add_flash(request: Request, message: str, level: str = "info") -> None:
     request.session["flashes"] = fs
 
 
+def _safe_next_path(raw: str | None, default: str = "/dashboard") -> str:
+    value = (raw or "").strip()
+    if not value:
+        return default
+    # Allow only in-site absolute paths and block scheme-relative redirects.
+    if not value.startswith("/") or value.startswith("//"):
+        return default
+    return value
+
+
 def audit_log(request: Request | None, action: str, target_user_id: int | None = None, details: str | None = None) -> None:
     try:
         conn = connect()
@@ -907,7 +917,8 @@ def global_search(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 def register_form(request: Request):
-    return _render_register_form(request)
+    next_path = _safe_next_path(request.query_params.get("next", ""), default="")
+    return _render_register_form(request, next_path=next_path)
 
 
 def _load_group_names() -> list[str]:
@@ -923,6 +934,7 @@ def _render_register_form(
     request: Request,
     error: str | None = None,
     form_data: dict[str, str] | None = None,
+    next_path: str = "",
 ) -> HTMLResponse:
     return render(
         request,
@@ -931,6 +943,7 @@ def _render_register_form(
             "error": error,
             "available_groups": _load_group_names(),
             "form_data": form_data or {},
+            "next": next_path,
         },
     )
 
@@ -944,7 +957,9 @@ def register(
     email: str = Form(""),
     password: str = Form(...),
     student_group: str = Form(""),
+    next: str = Form(""),
 ):
+    next_path = _safe_next_path(next, default="")
     role = (role or "student").strip().lower()
     form_state = {
         "full_name": (full_name or "").strip(),
@@ -952,7 +967,12 @@ def register(
         "student_group": (student_group or "").strip(),
     }
     if role != "student":
-        return _render_register_form(request, "Самостоятельная регистрация доступна только студентам.", form_state)
+        return _render_register_form(
+            request,
+            "Самостоятельная регистрация доступна только студентам.",
+            form_state,
+            next_path=next_path,
+        )
 
     clean_login = validate_login(form_state["login"])
     if not clean_login:
@@ -960,21 +980,27 @@ def register(
             request,
             "Некорректный логин. Используйте 3-80 символов без пробелов.",
             form_state,
+            next_path=next_path,
         )
 
     # --- Валидация пароля ---
     pw_ok, pw_err = validate_password(password)
     if not pw_ok:
-        return _render_register_form(request, pw_err, form_state)
+        return _render_register_form(request, pw_err, form_state, next_path=next_path)
 
     # --- Санитизация имени ---
     clean_name = sanitize_full_name(full_name)
     if not clean_name:
-        return _render_register_form(request, "Укажите ФИО.", form_state)
+        return _render_register_form(request, "Укажите ФИО.", form_state, next_path=next_path)
 
     normalized_group = (student_group or "").strip()
     if not normalized_group:
-        return _render_register_form(request, "Для студента необходимо выбрать группу.", form_state)
+        return _render_register_form(
+            request,
+            "Для студента необходимо выбрать группу.",
+            form_state,
+            next_path=next_path,
+        )
 
     salt = new_salt()
     password_hash = hash_password(password, salt)
@@ -994,18 +1020,23 @@ def register(
                 assigned_teacher_id,
             ),
         )
+        user_id = int(cur.lastrowid)
         conn.commit()
     except Exception:
         conn.close()
-        return _render_register_form(request, "Логин уже используется.", form_state)
+        return _render_register_form(request, "Логин уже используется.", form_state, next_path=next_path)
     conn.close()
-    add_flash(request, "Регистрация успешна. Войдите под своим логином и паролем.", "success")
-    return RedirectResponse("/login", status_code=302)
+    request.session["user_id"] = user_id
+    request.session["user_email"] = clean_login
+    add_flash(request, "Регистрация успешна.", "success")
+    if next_path:
+        return RedirectResponse(next_path, status_code=302)
+    return RedirectResponse("/dashboard", status_code=302)
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
-    next_path = request.query_params.get("next", "")
+    next_path = _safe_next_path(request.query_params.get("next", ""), default="")
     login_value = request.query_params.get("login", "")
     return render(request, "login.html", {"error": None, "next": next_path, "login": login_value})
 
@@ -1018,6 +1049,7 @@ def login(
     password: str = Form(...),
     next: str = Form(""),
 ):
+    next_path = _safe_next_path(next, default="")
     # normalize login
     raw_login = (login or email or "").strip()
     clean_login = validate_login(raw_login)
@@ -1025,7 +1057,7 @@ def login(
         return render(
             request,
             "login.html",
-            {"error": "Укажите корректный логин.", "next": next, "login": raw_login},
+            {"error": "Укажите корректный логин.", "next": next_path, "login": raw_login},
         )
 
     # --- Rate-limit по IP ---
@@ -1034,7 +1066,7 @@ def login(
         wait = login_limiter.remaining_seconds(client_ip)
         return render(request, "login.html", {
             "error": f"Слишком много попыток входа. Подождите {wait} сек.",
-            "next": next,
+            "next": next_path,
             "login": raw_login,
         })
 
@@ -1048,21 +1080,21 @@ def login(
         return render(
             request,
             "login.html",
-            {"error": "Неверный логин или пароль.", "next": next, "login": raw_login},
+            {"error": "Неверный логин или пароль.", "next": next_path, "login": raw_login},
         )
     if not verify_password(password, row["salt"], row["password_hash"]):
         login_limiter.record(client_ip)
         return render(
             request,
             "login.html",
-            {"error": "Неверный логин или пароль.", "next": next, "login": raw_login},
+            {"error": "Неверный логин или пароль.", "next": next_path, "login": raw_login},
         )
 
     if row["role"] not in {"student", "teacher", "admin"}:
         return render(
             request,
             "login.html",
-            {"error": "Для этой учетной записи вход отключен.", "next": next, "login": raw_login},
+            {"error": "Для этой учетной записи вход отключен.", "next": next_path, "login": raw_login},
         )
 
     # Сброс rate-limiter при успехе
@@ -1090,12 +1122,12 @@ def login(
         request.session["admin_authenticated"] = True
         request.session["admin_email"] = row["email"]
         return RedirectResponse("/admin/students", status_code=302)
-    if row["role"] == "teacher" and (not next or next == ""):
+    if row["role"] == "teacher" and not next_path:
         return RedirectResponse("/v2/teacher", status_code=302)
     # redirect to requested path if safe
     redirect_to = "/dashboard"
-    if next and isinstance(next, str) and next.startswith("/"):
-        redirect_to = next
+    if next_path:
+        redirect_to = next_path
     return RedirectResponse(redirect_to, status_code=302)
 
 
@@ -2201,7 +2233,8 @@ def student_test_entry(request: Request, test_id: int):
 
     user = get_current_user(request)
     if not user:
-        return RedirectResponse(f"/login?next=/student/tests/{test_id}/take", status_code=302)
+        target = quote_plus(f"/student/tests/{test_id}/take")
+        return RedirectResponse(f"/login?next={target}", status_code=302)
 
     if user.get("role") != "student":
         add_flash(request, "Прохождение тестов доступно только для студентов.", "error")

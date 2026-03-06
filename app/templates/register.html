@@ -3,9 +3,13 @@
 {% set form = form_data if form_data else {} %}
 <div class="card narrow register-card">
   <h2>Регистрация студента</h2>
+  {% if next and '/student/tests/' in next %}
+  <div class="alert">После регистрации вы сразу вернетесь к тесту.</div>
+  {% endif %}
   {% if error %}<div class="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/register" class="auth-form">
     <input type="hidden" name="role" value="student" />
+    <input type="hidden" name="next" value="{{ next if next else '' }}" />
 
     <label>ФИО</label>
     <input type="text" name="full_name" value="{{ form.get('full_name', '') }}" required />
@@ -31,6 +35,7 @@
     <label>Пароль</label>
     <input type="password" name="password" required />
     <button class="button" type="submit">Создать аккаунт</button>
+    <a class="button secondary" href="/login{% if next %}?next={{ next }}{% endif %}">Уже есть аккаунт</a>
   </form>
 </div>
 
