@@ -20,12 +20,19 @@
         <div class="group-members admin-student-group-members" id="v2-students-group-{{ loop.index }}">
           <div class="list admin-student-group-list">
             {% for s in group.students %}
-              <div class="card admin-card">
-                <div class="card-title">{{ s.full_name }}</div>
-                <div class="card-desc">Логин: {{ s.email }}</div>
-                <div class="muted">Группа: {{ s.student_group or 'Без группы' }}</div>
-                <div class="muted">Последний вход: {{ s.last_login }}</div>
-                <form method="post" action="/v2/teacher/students/{{ s.id }}/set_group?next=/v2/teacher/students" class="inline-group-form" style="margin-top:8px;">
+              <div class="card admin-card user-card student-management-card">
+                <div class="card-head">
+                  <div class="card-icon">{{ s.full_name[0]|upper }}</div>
+                  <div style="flex:1; min-width:0;">
+                    <div class="card-title">{{ s.full_name }}</div>
+                    <div class="card-desc">Логин: {{ s.email }}</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="muted">Группа: {{ s.student_group or 'Без группы' }}</div>
+                  <div class="muted">Последний вход: {{ s.last_login }}</div>
+                </div>
+                <form method="post" action="/v2/teacher/students/{{ s.id }}/set_group?next=/v2/teacher/students" class="inline-group-form student-card-group-form">
                   <select name="student_group">
                     <option value="__none__">Без группы</option>
                     {% for g in available_groups %}
@@ -34,7 +41,7 @@
                   </select>
                   <button class="button secondary" type="submit">Переместить</button>
                 </form>
-                <div class="actions-inline" style="margin-top:8px;">
+                <div class="card-footer actions-inline student-card-actions">
                   <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/edit">Редактировать</a>
                   <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/performance">Успеваемость</a>
                   <form method="post" action="/v2/teacher/students/{{ s.id }}/delete" onsubmit="return confirm('Удалить студента? Это действие необратимо.');" style="margin:0;">

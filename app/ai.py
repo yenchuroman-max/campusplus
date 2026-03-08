@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -108,6 +108,13 @@ ALLOWED_LATIN_TERMS = {
     "xml",
     "api",
 }
+
+SOURCE_ARTIFACT_PATTERNS = (
+    r"copyright",
+    r"all rights reserved",
+    r"and/or its affiliates",
+    r"и/или ее дочерние компании",
+)
 
 GENERIC_FOCUS_TOKENS = {
     "возможного",
@@ -317,6 +324,23 @@ def _strip_code_fragments(value: str) -> str:
     return " ".join(kept).strip()
 
 
+def _has_source_artifacts(value: str) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return True
+    low = text.lower()
+
+    if any(marker in low for marker in SOURCE_ARTIFACT_PATTERNS):
+        return True
+    if any(symbol in text for symbol in ("©", "®", "™")):
+        return True
+    if re.search(r"_{3,}", text):
+        return True
+    if re.search(r"\b(?:19|20)\d{2}\b", text) and any(symbol in text for symbol in ("©", "®", "™")):
+        return True
+    return False
+
+
 def _is_weak_focus_unit(unit: str) -> bool:
     value = (unit or "").strip().lower()
     if not value:
@@ -438,6 +462,7 @@ def _cfg(key: str, default: str = "") -> str:
 
 def _prepare_source_text(text: str, max_chars: int = 18000) -> str:
     text = (text or "").replace("\r", "\n")
+    text = re.sub(r"(?im)^.*(?:©|®|™|copyright|all rights reserved|and/or its affiliates|и/или ее дочерние компании).*$", "", text)
     text = re.sub(r"(?im)^\s*источник\s*:\s*$", "", text)
     text = re.sub(r"(?im)^\s*source\s*:\s*$", "", text)
     text = re.sub(r"https?://\S+", " ", text)
@@ -793,6 +818,8 @@ def _normalize_questions(items: list[dict], count: int, strict: bool = True) -> 
         for option in base_options:
             normalized_option = _shorten_text(option, limit=80)
             low_option = normalized_option.lower()
+            if _has_source_artifacts(normalized_option):
+                continue
             # Фильтруем мусор: URL, wiki-разметка, обрезанные тексты
             if any(marker in low_option for marker in ("http", "https", "www.", "wikipedia", "источник", "source", "англ")):
                 continue
@@ -864,11 +891,13 @@ def _normalize_questions(items: list[dict], count: int, strict: bool = True) -> 
             continue
 
         low_text = text.lower()
+        if _has_source_artifacts(text):
+            continue
         if any(marker in low_text for marker in ("http", "https", "www.", "wikipedia", "источник", "source", "англ")):
             continue
 
-        # Убиваем вопросы типа "Вставьте пропущенный термин" от AI — всегда мусорное качество
-        if strict and re.search(r"вставьте\s+пропущенн|заполните\s+пропуск|пропущенный\s+термин", low_text):
+        # Убиваем вопросы типа "Вставьте пропущенный термин" в любом режиме.
+        if re.search(r"вставьте\s+пропущенн|заполните\s+пропуск|пропущенный\s+термин|_{3,}", low_text):
             continue
 
         # Убиваем шаблонные вопросы "Что верно о понятии...", "Какое утверждение верно..." (strict mode)
@@ -1820,13 +1849,17 @@ def _generate_fallback(text: str, count: int, difficulty: str, discipline_name: 
             used_texts.add(q["text"])
             questions.append(q)
 
-    # ── Шаг 3: Cloze как последний резерв ─────────────────────────
+    # ── Шаг 3: резервная добивка только содержательными вопросами ─
     if len(questions) < count:
-        for attempt in range(count * 4):
+        for attempt in range(count * 6):
             if len(questions) >= count:
                 break
             sent = sentences[attempt % len(sentences)]
-            q = _fb_cloze(sent, terms, attempt)
+            q = _fb_true_statement(sent, sentences, terms, attempt)
+            if not q:
+                q = _fb_topic(sent, terms, term_sents, sentences, attempt, used_topic_terms)
+            if not q and len(definitions) >= 3:
+                q = _fb_definition(definitions, attempt, used_def_terms)
             if q and q["text"] not in used_texts:
                 used_texts.add(q["text"])
                 questions.append(q)
@@ -2322,3 +2355,4 @@ def generate_questions(
             normalized = _normalize_questions(normalized + extra, count, strict=False)
         return _top_up_questions(normalized, text, count)
     return []
+

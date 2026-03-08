@@ -63,7 +63,7 @@
             <td>{{ item.taken_at }}</td>
             <td>{{ item.score }}</td>
             <td>
-              <a href="/student/attempts/{{ item.attempt_id }}">
+              <a class="review-link {% if item.score|float >= 100 %}review-link-success{% else %}review-link-default{% endif %}" href="/student/attempts/{{ item.attempt_id }}">
                 {% if item.score|float >= 100 %}Разбор (без ошибок){% else %}Посмотреть ошибки{% endif %}
               </a>
             </td>
@@ -95,7 +95,7 @@
             <td>{{ item.taken_at }}</td>
             <td>{{ item.score }}</td>
             <td>
-              <a href="/student/attempts/{{ item.attempt_id }}">
+              <a class="review-link {% if item.score|float >= 100 %}review-link-success{% else %}review-link-default{% endif %}" href="/student/attempts/{{ item.attempt_id }}">
                 {% if item.score|float >= 100 %}Разбор (без ошибок){% else %}Посмотреть ошибки{% endif %}
               </a>
             </td>

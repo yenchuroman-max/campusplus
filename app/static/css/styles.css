@@ -834,6 +834,10 @@ body.nav-open .nav-toggle-line:nth-child(3) { transform: translateY(-6px) rotate
 }
 
 .user-card .card-head { margin-bottom: var(--sp-2); }
+.student-management-card .card-body {
+  display: grid;
+  gap: 6px;
+}
 
 /* ── Hero ──────────────────────────────────────────────────── */
 .hero {
@@ -1267,11 +1271,23 @@ body.nav-open .nav-toggle-line:nth-child(3) { transform: translateY(-6px) rotate
 .grid > .card, .list > .card,
 .grid > .link-card, .list > .link-card { height: 100%; }
 
+.grid > .card,
+.list > .card {
+  display: flex;
+  flex-direction: column;
+}
+
 .grid > .link-card > .card,
 .list > .link-card > .card {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.grid > .card > .actions-inline:last-child,
+.list > .card > .actions-inline:last-child {
+  margin-top: auto;
+  padding-top: var(--sp-2);
 }
 
 /* ── Groups Grid ───────────────────────────────────────────── */
@@ -1671,6 +1687,32 @@ input[type="file"]::file-selector-button {
   min-height: 40px;
 }
 
+.student-card-group-form {
+  margin: var(--sp-2) 0 0;
+}
+
+.student-card-group-form select,
+.student-card-group-form .button {
+  min-width: 0;
+}
+
+.student-card-actions {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+}
+
+.student-card-actions > .button,
+.student-card-actions > a.button,
+.student-card-actions > form {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.student-card-actions .button,
+.student-card-actions form .button {
+  width: 100%;
+}
+
 .table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -1681,6 +1723,39 @@ input[type="file"]::file-selector-button {
   display: inline-flex;
   align-items: center;
   margin: 0;
+}
+
+.review-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: var(--r-full);
+  border: 1px solid transparent;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.review-link-default {
+  color: var(--accent);
+}
+
+.review-link-default:hover {
+  color: #f2a8b1;
+}
+
+.review-link-success {
+  color: #86efac;
+  background: var(--success-bg);
+  border-color: rgba(52, 211, 153, 0.26);
+}
+
+.review-link-success:hover {
+  color: #bbf7d0;
+  background: rgba(52, 211, 153, 0.18);
 }
 
 .tests-create-card .card-desc {
@@ -2311,6 +2386,25 @@ html[data-theme="light"] .table tbody tr:hover {
 }
 html[data-theme="light"] .table a:hover {
   color: #3f63ab;
+}
+
+html[data-theme="light"] .review-link-default {
+  color: #a54f5f;
+}
+
+html[data-theme="light"] .review-link-default:hover {
+  color: #8b3d4d;
+}
+
+html[data-theme="light"] .review-link-success {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.26);
+}
+
+html[data-theme="light"] .review-link-success:hover {
+  color: #064e3b;
+  background: rgba(16, 185, 129, 0.2);
 }
 
 html[data-theme="light"] .flash-success {

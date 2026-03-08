@@ -1,4 +1,4 @@
-"""
+﻿"""
 Полные функциональные тесты платформы мониторинга успеваемости.
 
 Покрывают:
@@ -30,9 +30,9 @@ sys.path.insert(0, str(ROOT))
 # ── Фикстура: изолированная БД для каждого теста ────────────────
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
-    """Создаёт временную SQLite БД, подменяет app.db.DB_PATH."""
+    """Создаёт временную SQLite БД, подменяет актуальный sqlite path в app.db."""
     db_file = tmp_path / "test.db"
-    monkeypatch.setattr("app.db.DB_PATH", db_file)
+    monkeypatch.setattr("app.db.SQLITE_DB_PATH", db_file)
     from app.db import init_db
     init_db()
     yield db_file
@@ -1077,8 +1077,36 @@ class TestAIUtils:
         result = _normalize_questions(items, 5)
         assert len(result) == 1
 
+    # дополнительная регрессия на OCR/copyright-артефакты
+    def test_prepare_source_text_removes_copyright_lines(self):
+        from app.ai import _prepare_source_text
+        text = (
+            "Полезный учебный материал о сетевой безопасности и сегментации трафика.\n"
+            "© Cisco and/or its affiliates, 2016\n"
+            "Еще один содержательный абзац по теме маршрутизации и ACL.\n"
+        )
+        result = _prepare_source_text(text)
+        assert "Cisco" not in result
+        assert "2016" not in result
+        assert "маршрутизации" in result
 
-# ═══════════════════════════════════════════════════════════════
+    def test_normalize_questions_filters_blank_and_artifact_items(self):
+        from app.ai import _normalize_questions
+        items = [
+            {
+                "text": "Вставьте пропущенный термин: 2 © Cisco и/или ее ___ компании, 2016",
+                "options": ["дочерние", "защищены", "интернет", "компании"],
+                "correct_index": 0,
+            },
+            {
+                "text": "Какой протокол используется для безопасного удаленного доступа?",
+                "options": ["SSH", "HTTP", "FTP", "Telnet"],
+                "correct_index": 0,
+            },
+        ]
+        result = _normalize_questions(items, 5)
+        assert len(result) == 1
+        assert "SSH" in result[0]["options"]
 # 9. AI: Fallback генерация
 # ═══════════════════════════════════════════════════════════════
 
@@ -1625,3 +1653,4 @@ class TestLoginRateLimit:
                         follow_redirects=False)
         assert r.status_code == 200
         assert "попыток" in r.text.lower() or "подождите" in r.text.lower()
+
