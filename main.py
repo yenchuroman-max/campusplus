@@ -592,14 +592,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _session_cookie_settings() -> tuple[bool, str, int]:
-    # In production mobile webviews are more stable with SameSite=None + Secure.
-    # Keep local defaults friendly for HTTP dev unless overridden by env.
+    # Default to Lax for stable first-party auth and safer cross-browser behaviour.
+    # Allow explicit override through env when an embedding/webview scenario needs it.
     running_on_render = bool((os.getenv("RENDER") or "").strip())
     secure_cookie = _env_bool("SESSION_COOKIE_SECURE", running_on_render)
 
     same_site = (os.getenv("SESSION_COOKIE_SAMESITE") or "").strip().lower()
     if same_site not in {"lax", "strict", "none"}:
-        same_site = "none" if secure_cookie else "lax"
+        same_site = "lax"
 
     if same_site == "none":
         secure_cookie = True
@@ -628,6 +628,7 @@ _session_cookie_secure, _session_cookie_samesite, _session_cookie_max_age = _ses
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret,
+    session_cookie="campusplus_session",
     same_site=_session_cookie_samesite,
     https_only=_session_cookie_secure,
     max_age=_session_cookie_max_age,
@@ -652,6 +653,16 @@ def get_current_user(request: Request) -> dict | None:
     return dict(row) if row else None
 
 
+def establish_user_session(request: Request, *, user_id: int, email: str, role: str) -> None:
+    # Always reset the signed session when switching identities.
+    request.session.clear()
+    request.session["user_id"] = int(user_id)
+    request.session["user_email"] = email
+    if role == "admin":
+        request.session["admin_authenticated"] = True
+        request.session["admin_email"] = email
+
+
 def require_user(request: Request) -> dict:
     user = get_current_user(request)
     if not user:
@@ -669,6 +680,28 @@ def render(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse
     base["global_search_query"] = (request.query_params.get("q") or "").strip()
     base.update(context)
     return templates.TemplateResponse(name, base)
+
+
+def _merge_vary_cookie(headers) -> None:
+    current = headers.get("Vary", "")
+    values = [part.strip() for part in current.split(",") if part.strip()]
+    if "Cookie" not in values:
+        values.append("Cookie")
+    headers["Vary"] = ", ".join(values)
+
+
+@app.middleware("http")
+async def disable_cache_for_dynamic_pages(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path or "/"
+    if path.startswith("/static"):
+        return response
+
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    _merge_vary_cookie(response.headers)
+    return response
 
 
 def add_flash(request: Request, message: str, level: str = "info") -> None:
@@ -1026,8 +1059,7 @@ def register(
         conn.close()
         return _render_register_form(request, "Логин уже используется.", form_state, next_path=next_path)
     conn.close()
-    request.session["user_id"] = user_id
-    request.session["user_email"] = clean_login
+    establish_user_session(request, user_id=user_id, email=clean_login, role="student")
     add_flash(request, "Регистрация успешна.", "success")
     if next_path:
         return RedirectResponse(next_path, status_code=302)
@@ -1116,11 +1148,8 @@ def login(
     cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.utcnow().isoformat(), row["id"]))
     conn.commit()
     conn.close()
-    request.session["user_id"] = row["id"]
-    request.session["user_email"] = row["email"]
+    establish_user_session(request, user_id=row["id"], email=row["email"], role=row["role"])
     if row["role"] == "admin":
-        request.session["admin_authenticated"] = True
-        request.session["admin_email"] = row["email"]
         return RedirectResponse("/admin/students", status_code=302)
     if row["role"] == "teacher" and not next_path:
         return RedirectResponse("/v2/teacher", status_code=302)
@@ -3062,9 +3091,9 @@ def admin_group(request: Request, group_name: str):
     return render(request, "admin_groups.html", {"mode": "admin", **context})
 # --- Separate admin panel (v1) with its own simple auth ---
 def admin_panel_auth(request: Request) -> bool:
-    # Auth must rely on signed server session only.
-    # Auxiliary cookies can be dropped by browsers/proxies and should not force logout.
-    return bool(request.session.get("admin_authenticated"))
+    # Legacy v1 admin routes must verify both the admin marker and the actual user role.
+    user = get_current_user(request)
+    return bool(request.session.get("admin_authenticated") and user and user.get("role") == "admin")
 
 
 def ensure_start_session_cookie(request: Request) -> None:
@@ -3223,17 +3252,13 @@ def v2_admin_login(
         cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, row["id"]))
         conn.commit()
         conn.close()
-    request.session["user_id"] = row["id"]
-    request.session["admin_authenticated"] = True
-    request.session["admin_email"] = row["email"]
+    establish_user_session(request, user_id=row["id"], email=row["email"], role="admin")
     return RedirectResponse("/admin/students", status_code=302)
 
 
 @app.post("/v1/admin/logout")
 def v1_admin_logout(request: Request):
-    request.session.pop("user_id", None)
-    request.session.pop("admin_authenticated", None)
-    request.session.pop("admin_email", None)
+    request.session.clear()
     return RedirectResponse("/v2/admin", status_code=302)
 
 

@@ -27,6 +27,15 @@ from app.security import (
 
 router = APIRouter(prefix="/api", tags=["API"])
 
+
+def _establish_user_session(request: Request, *, user_id: int, email: str, role: str) -> None:
+    request.session.clear()
+    request.session["user_id"] = int(user_id)
+    request.session["user_email"] = email
+    if role == "admin":
+        request.session["admin_authenticated"] = True
+        request.session["admin_email"] = email
+
 # ═══════════════════════════════════════════════════════════════
 # Pydantic-модели
 # ═══════════════════════════════════════════════════════════════
@@ -206,11 +215,7 @@ def api_login(request: Request, data: LoginIn):
         cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, row["id"]))
         conn.commit()
         conn.close()
-    request.session["user_id"] = row["id"]
-    request.session["user_email"] = row["email"]
-    if row["role"] == "admin":
-        request.session["admin_authenticated"] = True
-        request.session["admin_email"] = row["email"]
+    _establish_user_session(request, user_id=row["id"], email=row["email"], role=row["role"])
     conn = connect()
     cur = conn.cursor()
     cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.utcnow().isoformat(), row["id"]))

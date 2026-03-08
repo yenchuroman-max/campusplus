@@ -278,6 +278,65 @@ class TestAuth:
         assert r.status_code == 302
         assert "/" == r.headers.get("location", "").rstrip("/") or r.headers.get("location", "") == "/"
 
+    def test_relogin_clears_stale_admin_session_flags(self, client, db):
+        _create_admin(db)
+        _insert_user(db, role="teacher", login="teacher_relogin@test.ru", password="pass123", full_name="Teacher Relogin")
+
+        admin_login = _login_admin(client)
+        assert admin_login.status_code == 302
+
+        teacher_login = _login(client, email="teacher_relogin@test.ru", password="pass123")
+        assert teacher_login.status_code == 302
+        assert "/v2/teacher" in teacher_login.headers.get("location", "")
+
+        dashboard = client.get("/dashboard")
+        assert dashboard.status_code == 200
+        assert "Teacher Relogin" in dashboard.text
+
+        stale_admin = client.get("/v1/admin/students", follow_redirects=False)
+        assert stale_admin.status_code == 302
+        assert "/v1/admin" in stale_admin.headers.get("location", "")
+
+    def test_parallel_clients_keep_isolated_sessions(self, isolated_db, db):
+        from fastapi.testclient import TestClient
+        import main as main_module
+        from app.db import init_db
+
+        init_db()
+        _create_group(db, "BI-41")
+        _insert_user(db, role="student", login="iso_one@test.ru", password="pass123", full_name="Student One", group="BI-41")
+        _insert_user(db, role="student", login="iso_two@test.ru", password="pass123", full_name="Student Two", group="BI-41")
+
+        with TestClient(main_module.app, raise_server_exceptions=False) as client_one, TestClient(main_module.app, raise_server_exceptions=False) as client_two:
+            assert _login(client_one, email="iso_one@test.ru").status_code == 302
+            assert _login(client_two, email="iso_two@test.ru").status_code == 302
+
+            dash_one = client_one.get("/dashboard")
+            dash_two = client_two.get("/dashboard")
+
+            assert dash_one.status_code == 200
+            assert dash_two.status_code == 200
+            assert "Student One" in dash_one.text
+            assert "Student Two" not in dash_one.text
+            assert "Student Two" in dash_two.text
+            assert "Student One" not in dash_two.text
+
+    def test_dynamic_pages_disable_cache_and_use_project_cookie(self, client, db):
+        login_page = client.get("/login")
+        assert login_page.status_code == 200
+        assert "no-store" in login_page.headers.get("cache-control", "").lower()
+        assert "cookie" in login_page.headers.get("vary", "").lower()
+
+        _insert_user(db, role="teacher", login="cache_teacher@test.ru", password="pass123", full_name="Cache Teacher")
+        login_response = _login(client, email="cache_teacher@test.ru")
+        assert login_response.status_code == 302
+        assert "campusplus_session=" in login_response.headers.get("set-cookie", "")
+
+        dashboard = client.get("/dashboard")
+        assert dashboard.status_code == 200
+        assert "no-store" in dashboard.headers.get("cache-control", "").lower()
+        assert "cookie" in dashboard.headers.get("vary", "").lower()
+
     @pytest.mark.parametrize(
         "role, login, password, initial_name, updated_name",
         [

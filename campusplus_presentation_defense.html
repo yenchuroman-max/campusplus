@@ -1,0 +1,469 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>КампусПлюс — дипломная презентация</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@600;700&family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet" />
+<style>
+
+:root{
+  --ink:#14233a;
+  --ink-soft:#5d6d84;
+  --line:rgba(20,35,58,.09);
+  --line-strong:rgba(20,35,58,.14);
+  --blue:#4f81bd;
+  --red:#c0504d;
+  --green:#9bbb59;
+  --cyan:#4bacc6;
+  --orange:#f79646;
+  --paper:#f7fbff;
+  --panel:rgba(255,255,255,.84);
+  --panel-strong:rgba(255,255,255,.94);
+  --shadow:0 28px 70px rgba(23,36,60,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{
+  font-family:"Manrope",sans-serif;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at 12% 10%, rgba(79,129,189,.16), transparent 26%),
+    radial-gradient(circle at 88% 12%, rgba(192,80,77,.14), transparent 24%),
+    radial-gradient(circle at 50% 100%, rgba(247,150,70,.12), transparent 34%),
+    linear-gradient(135deg, #edf3fa 0%, #fbf7f1 46%, #eef8f8 100%);
+}
+.stage{
+  position:relative;
+  width:100vw;
+  height:100vh;
+  padding:12px;
+}
+.deck{
+  position:relative;
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  border-radius:28px;
+  border:1px solid rgba(255,255,255,.72);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.96)),
+    linear-gradient(135deg, rgba(79,129,189,.06), rgba(75,172,198,.03));
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(18px);
+}
+.deck:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(79,129,189,.08), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(192,80,77,.07), transparent 24%),
+    radial-gradient(circle at 100% 100%, rgba(247,150,70,.07), transparent 28%);
+  pointer-events:none;
+}
+.ribbon{
+  position:absolute;
+  inset:0 0 auto 0;
+  height:10px;
+  background:linear-gradient(90deg, var(--orange), var(--red), var(--blue), var(--cyan));
+  z-index:4;
+}
+.slide{
+  position:absolute;
+  inset:0;
+  padding:2.9% 3.8% 5.8%;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr);
+  gap:2.2%;
+  opacity:0;
+  transform:translateX(3%);
+  transition:opacity .38s ease, transform .38s ease;
+  pointer-events:none;
+}
+.slide.active{opacity:1;transform:none;pointer-events:auto}
+.slide:after{
+  content:"";
+  position:absolute;
+  inset:16px;
+  border-radius:26px;
+  border:1px solid rgba(20,35,58,.08);
+  background:linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.05));
+  pointer-events:none;
+}
+.slide > *{position:relative;z-index:1}
+.head{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:start;
+  gap:24px;
+}
+.uni{display:flex;gap:20px;min-width:0}
+.marks{display:grid;gap:12px;align-content:start}
+.mark{
+  width:62px;height:62px;border-radius:20px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.88);
+  display:grid;place-items:center;
+  box-shadow:0 16px 28px rgba(23,36,60,.08);
+  overflow:hidden;
+}
+.mark img{width:38px;height:38px;object-fit:contain}
+.copy{min-width:0}
+.meta{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.meta span,.chip{
+  display:inline-flex;align-items:center;padding:9px 14px;border-radius:999px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.86);
+  color:var(--ink-soft);
+  font-size:clamp(10px,.66vw,12px);
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+h1,h2{
+  margin:0;
+  font-family:"IBM Plex Serif",serif;
+  letter-spacing:-.045em;
+  line-height:.95;
+  color:#16233a;
+}
+h1{font-size:clamp(32px,3.2vw,58px);max-width:14.2ch}
+h2{font-size:clamp(25px,2.65vw,48px);max-width:13.4ch}
+.copy p,.lead,.card p,.quote p,.list li,.step span,figcaption,.phone span,.table td,.table th{
+  font-size:clamp(13px,.98vw,18px);
+  line-height:1.48;
+  color:var(--ink-soft);
+}
+.copy p{margin:12px 0 0;max-width:74ch}
+.num{
+  min-width:96px;
+  padding:14px 18px;
+  border-radius:22px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.82);
+  text-align:center;
+  color:var(--ink-soft);
+  font-size:clamp(12px,.88vw,15px);
+  font-weight:800;
+  box-shadow:0 14px 24px rgba(23,36,60,.07);
+}
+.body{display:grid;gap:14px;min-height:0}
+.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.wide{grid-template-columns:minmax(0,.98fr) minmax(0,1.02fr)}
+.full{grid-template-columns:minmax(0,1fr)}
+.col{display:grid;align-content:start;gap:14px;min-width:0}
+.hero,.grid3,.grid4,.gallery,.phones,.tasks{display:grid;gap:14px}
+.hero{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}
+.tasks{grid-template-columns:repeat(3,minmax(0,1fr))}
+.phones{grid-template-columns:repeat(4,minmax(0,1fr))}
+.card,.metric,.quote,.flow,.tablewrap,figure{
+  margin:0;
+  border-radius:24px;
+  border:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.78));
+  box-shadow:0 20px 44px rgba(23,36,60,.07);
+}
+.card,.metric,.quote,.flow,.tablewrap,.screen,.phone{padding:18px 20px}
+.card:before,.metric:before,.quote:before,.flow:before,.tablewrap:before,.screen:before,.phone:before{
+  content:"";
+  display:block;
+  width:84px;
+  height:5px;
+  margin-bottom:14px;
+  border-radius:999px;
+  background:linear-gradient(90deg, var(--orange), var(--red), var(--blue));
+}
+.metric b{display:block;font-size:clamp(18px,1.55vw,28px);font-weight:800;color:var(--ink);margin-bottom:8px}
+.metric strong,.card h3,.quote h3,.flow h3{display:block;margin:0 0 8px;color:var(--ink);font-size:clamp(14px,1.02vw,20px);font-weight:800}
+.actions,.chips{display:flex;flex-wrap:wrap;gap:12px}
+button{appearance:none;border:0;font:inherit;cursor:pointer;transition:transform .18s ease, box-shadow .18s ease}
+button:hover{transform:translateY(-2px)}
+.action,.ghost{
+  padding:13px 18px;
+  border-radius:18px;
+  font-size:clamp(13px,.95vw,17px);
+  font-weight:800;
+}
+.action{color:#fff;background:linear-gradient(90deg, var(--red), var(--blue));box-shadow:0 18px 32px rgba(79,129,189,.2)}
+.ghost{color:var(--ink);background:rgba(255,255,255,.9);border:1px solid var(--line);box-shadow:0 14px 24px rgba(23,36,60,.07)}
+.list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.list li{position:relative;padding-left:18px}
+.list li:before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:.58em;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:linear-gradient(180deg, var(--red), var(--blue));
+  box-shadow:0 0 0 4px rgba(79,129,189,.08);
+}
+.flowtrack{display:grid;gap:10px}
+.step{
+  display:grid;
+  grid-template-columns:36px 1fr;
+  gap:12px;
+  align-items:start;
+  padding:12px 14px;
+  border-radius:18px;
+  background:rgba(79,129,189,.055);
+  border:1px solid rgba(79,129,189,.1);
+}
+.step b{
+  display:grid;place-items:center;width:36px;height:36px;border-radius:14px;
+  background:linear-gradient(180deg, var(--blue), var(--red));
+  color:#fff;font-size:clamp(12px,.9vw,16px);margin:0;
+}
+.step strong{display:block;margin-bottom:4px;color:var(--ink);font-size:clamp(13px,1vw,18px)}
+.screenhd{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  margin-bottom:10px;
+  color:var(--ink-soft);
+  font-size:clamp(11px,.8vw,14px);
+  font-weight:700;
+}
+.dots{display:inline-flex;gap:6px}
+.dots i{display:block;width:10px;height:10px;border-radius:50%;background:rgba(79,129,189,.24)}
+.dots i:nth-child(1){background:rgba(192,80,77,.55)}
+.dots i:nth-child(2){background:rgba(247,150,70,.55)}
+.dots i:nth-child(3){background:rgba(155,187,89,.55)}
+.screen,.phone{min-height:0}
+.screen img,.phone img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  border-radius:16px;
+  border:1px solid rgba(20,35,58,.08);
+  background:#f4f7fb;
+  cursor:zoom-in;
+}
+.screen img{display:block;height:auto;max-height:46vh}
+.slide[data-title="Титульный слайд"] .screen img{max-height:38vh}
+.phone img{display:block;height:auto;aspect-ratio:9/19;max-height:34vh}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{padding:11px 8px;text-align:left;border-bottom:1px solid rgba(20,35,58,.08)}
+.table th{text-transform:uppercase;letter-spacing:.05em;font-size:clamp(11px,.8vw,14px);color:var(--ink-soft)}
+.ok{
+  display:inline-flex;align-items:center;padding:8px 12px;width:fit-content;border-radius:999px;
+  background:rgba(155,187,89,.16);color:#547228;font-size:clamp(11px,.8vw,14px);font-weight:800;
+}
+.footer{
+  position:absolute;
+  left:50%;
+  bottom:1.6%;
+  transform:translateX(-50%);
+  width:min(430px,34vw);
+  display:grid;
+  gap:8px;
+  justify-items:center;
+  z-index:4;
+}
+.counter{
+  color:rgba(20,35,58,.64);
+  font-size:clamp(11px,.84vw,14px);
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.progress{
+  width:100%;
+  height:8px;
+  border-radius:999px;
+  background:rgba(20,35,58,.08);
+  overflow:hidden;
+}
+.progress span{
+  display:block;
+  height:100%;
+  width:0;
+  border-radius:inherit;
+  background:linear-gradient(90deg, var(--orange), var(--red), var(--blue));
+  transition:width .28s ease;
+}
+.lightbox{
+  position:fixed;
+  inset:0;
+  display:grid;
+  place-items:center;
+  padding:24px;
+  background:rgba(9,18,34,.82);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .25s ease;
+  z-index:40;
+}
+.lightbox.open{opacity:1;pointer-events:auto}
+.lightbox figure{max-width:min(92vw,1760px);max-height:92vh;display:grid;gap:10px;margin:0;padding:0;border:0;background:transparent;box-shadow:none}
+.lightbox img{width:100%;max-height:86vh;object-fit:contain;border-radius:20px;background:#fff;box-shadow:0 28px 60px rgba(0,0,0,.34)}
+.lightbox figcaption{text-align:center;color:rgba(255,255,255,.88);font-size:14px}
+.close{
+  position:absolute;
+  top:22px;
+  right:24px;
+  width:52px;
+  height:52px;
+  border-radius:50%;
+  color:#fff;
+  background:rgba(255,255,255,.14);
+  font-size:28px;
+}
+code{font-family:"Consolas","SFMono-Regular",monospace;font-size:.92em}
+strong{color:var(--ink)}
+@media (max-width: 1360px){
+  .slide{padding:3.2% 3.6% 6.4%}
+  .hero,.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tasks,.grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .phones{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .screen img{max-height:39vh}
+  .phone img{max-height:28vh}
+}
+
+</style>
+</head>
+<body>
+<div class="stage"><div class="deck"><div class="ribbon"></div>
+<section class="slide active" data-title="Титульный слайд"><div class="head"><div class="uni"><div class="marks"><div class="mark"><img src="app/static/img/sgugit-mark.png" alt="СГУГиТ" /></div><div class="mark"><img src="app/static/img/logo.png" alt="КампусПлюс" /></div></div><div class="copy"><div class="meta"><span>СГУГиТ</span><span>Выпускная квалификационная работа</span><span>Кафедра прикладной информатики и информационных систем</span></div><h1>КампусПлюс: цифровая платформа для контроля знаний, генерации тестов и мониторинга успеваемости</h1><p>Проект для образовательной среды СГУГиТ, который объединяет лекции, тестирование, QR-доступ и аналитику успеваемости в одном веб-сервисе.</p></div></div><div class="num">01 / 19</div></div><div class="body wide two"><div class="col"><p class="lead">Преподаватель создает дисциплины и тесты, публикует их по QR-коду и сразу получает картину по группе, дисциплине и каждому обучающемуся.</p><div class="chips"><span class="chip">3 роли: преподаватель, студент, администратор</span><span class="chip">AI-генерация и ручной конструктор</span><span class="chip">Публикация тестов по QR-коду</span><span class="chip">Аналитика по дисциплинам и группам</span></div><div class="actions"><button class="action" type="button" data-goto="6">Маршрут преподавателя</button><button class="ghost" type="button" data-goto="12">Сценарий студента</button><button class="ghost" type="button" data-goto="16">Надежность и безопасность</button></div></div><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>https://campusplus.onrender.com/</span></div><img src="presentation_assets/desktop/01_home_desktop.png" alt="Главная страница платформы КампусПлюс" /><figcaption>Реальный экран проекта: стартовая страница платформы</figcaption></figure></div></section>
+<section class="slide" data-title="Актуальность"><div class="head"><div class="copy"><div class="meta"><span>Слайд 02</span><span>Актуальность</span></div><h2>Основная проблема состоит в высокой цене постоянного сопровождения контроля знаний</h2></div><div class="num">02 / 19</div></div><div class="body full"><div class="grid4"><article class="card"><h3>Высокие трудозатраты</h3><p>Преподаватель тратит много времени на ручное создание тестов, публикацию и последующий анализ результатов.</p></article><article class="card"><h3>Разрыв между лекцией и тестом</h3><p>Учебный материал часто существует отдельно от процедур контроля, из-за чего тестирование теряет содержательную связь с дисциплиной.</p></article><article class="card"><h3>Недостаток прозрачной аналитики</h3><p>Без единой платформы сложно увидеть объективную картину по группе, отдельному студенту и предмету.</p></article><article class="card"><h3>Запрос на цифровизацию</h3><p>Для образовательной среды СГУГиТ актуальны решения, которые экономят время преподавателя и дают измеримый эффект.</p></article></div><article class="quote"><h3>Актуальность проекта</h3><p>КампусПлюс решает прикладную задачу цифровизации контроля знаний: сокращает рутину преподавателя, делает результаты прозрачными и объединяет дисциплины, лекции, тесты и аналитику в одном сервисе.</p></article></div></section>
+<section class="slide" data-title="Цель и задачи"><div class="head"><div class="copy"><div class="meta"><span>Слайд 03</span><span>Цель и задачи</span></div><h2>Цель проекта — реализовать веб-платформу, сопровождающую полный цикл контроля знаний</h2></div><div class="num">03 / 19</div></div><div class="body full"><article class="quote"><h3>Цель</h3><p>Разработка платформы КампусПлюс для организации цифрового контроля знаний, генерации тестовых материалов и мониторинга успеваемости в образовательной среде СГУГиТ.</p></article><div class="tasks"><article class="card"><h3>Анализ предметной области</h3><p>Выявить реальные проблемы преподавателя и студента в текущем процессе тестирования.</p></article><article class="card"><h3>Проектирование данных</h3><p>Определить роли, дисциплины, лекции, тесты, вопросы, попытки и ответы.</p></article><article class="card"><h3>Разработка интерфейсов</h3><p>Сделать отдельные рабочие контуры для преподавателя, студента и администратора.</p></article><article class="card"><h3>Интеграция AI-модуля</h3><p>Автоматизировать создание тестовых вопросов на основе лекционного материала.</p></article><article class="card"><h3>Реализация аналитики</h3><p>Показывать результаты по группам, дисциплинам и конкретным обучающимся.</p></article><article class="card"><h3>Повышение надежности</h3><p>Обеспечить корректную авторизацию, изоляцию сессий и защиту персональных страниц от кэша.</p></article></div></div></section>
+<section class="slide" data-title="Суть проекта"><div class="head"><div class="copy"><div class="meta"><span>Слайд 04</span><span>Суть проекта</span></div><h2>КампусПлюс — это не просто сайт с тестами, а платформа мониторинга учебной успеваемости</h2></div><div class="num">04 / 19</div></div><div class="body two"><div class="col"><ul class="list"><li><strong>Преподаватель</strong> создает дисциплины и лекции, формирует тесты, публикует их и получает аналитику.</li><li><strong>Студент</strong> видит доступные дисциплины, проходит тесты и отслеживает личный прогресс.</li><li><strong>Администратор</strong> управляет пользователями, группами, привязками и организационной структурой.</li><li><strong>Платформа</strong> связывает лекционный материал, процедуру контроля и результаты в одном рабочем контуре.</li></ul></div><div class="grid4"><article class="metric"><b>Дисциплины</b><strong>Предметная структура</strong><p>Тесты и аналитика формируются в логике конкретного курса.</p></article><article class="metric"><b>Лекции</b><strong>Источник знаний</strong><p>Материал используется как база для генерации вопросов.</p></article><article class="metric"><b>Тесты</b><strong>Два режима создания</strong><p>Есть автоматическая генерация и ручной конструктор.</p></article><article class="metric"><b>Мониторинг</b><strong>Наглядная статистика</strong><p>Результаты сразу переходят в аналитику по студентам и группам.</p></article></div></div></section>
+<section class="slide" data-title="Технологическая реализация"><div class="head"><div class="copy"><div class="meta"><span>Слайд 05</span><span>Технологическая реализация</span></div><h2>Архитектура построена как прикладной веб-сервис с серверным рендерингом и AI-модулем</h2></div><div class="num">05 / 19</div></div><div class="body two"><div class="grid3"><article class="card"><h3>Backend</h3><p><strong>FastAPI на Python</strong>. Основная бизнес-логика, маршруты, роли и работа с данными.</p></article><article class="card"><h3>Frontend</h3><p><strong>Jinja2, HTML и CSS</strong>. Серверный рендеринг упрощает поддержку и развёртывание.</p></article><article class="card"><h3>База данных</h3><p><strong>SQLite</strong> используется в текущей версии, предусмотрен переход на <strong>PostgreSQL</strong>.</p></article><article class="card"><h3>Авторизация</h3><p><strong>SessionMiddleware</strong> обеспечивает вход по подписанной cookie-сессии.</p></article><article class="card"><h3>AI-модуль</h3><p><strong>app/ai.py</strong> отвечает за генерацию, нормализацию и fallback-логику.</p></article><article class="card"><h3>Структура данных</h3><p>В БД хранятся пользователи, дисциплины, лекции, тесты, попытки, ответы и аудит.</p></article></div><article class="flow"><h3>Как данные проходят через систему</h3><div class="flowtrack"><div class="step"><b>1</b><div><strong>Лекция</strong><span>Преподаватель добавляет учебный материал.</span></div></div><div class="step"><b>2</b><div><strong>Дисциплина</strong><span>Материал получает предметный контекст и будущую аналитику.</span></div></div><div class="step"><b>3</b><div><strong>Тест</strong><span>Контроль создается автоматически или вручную, затем редактируется.</span></div></div><div class="step"><b>4</b><div><strong>Прохождение</strong><span>Студенты выполняют тест, а результаты сохраняются в базе данных.</span></div></div><div class="step"><b>5</b><div><strong>Мониторинг</strong><span>Система показывает статистику по дисциплинам, группам и студентам.</span></div></div></div></article></div></section>
+<section class="slide" data-title="Модуль генерации"><div class="head"><div class="copy"><div class="meta"><span>Слайд 06</span><span>Модуль генерации тестов</span></div><h2>AI-модуль строится на прикладной цепочке генерации и валидации, а не на обучении собственной модели</h2></div><div class="num">06 / 19</div></div><div class="body wide two"><article class="flow"><h3>Как система получает итоговый тест</h3><div class="flowtrack"><div class="step"><b>1</b><div><strong>Входные данные</strong><span>Текст лекции, количество вопросов, уровень сложности и дисциплина.</span></div></div><div class="step"><b>2</b><div><strong>Извлечение тезисов</strong><span>Из материала выделяются ключевые смысловые блоки.</span></div></div><div class="step"><b>3</b><div><strong>Цепочка провайдеров</strong><span>Сначала Gemini, затем OpenAI, после чего — локальный fallback.</span></div></div><div class="step"><b>4</b><div><strong>Строгий формат</strong><span>Модель должна вернуть JSON-массив с полями <code>text</code>, <code>options</code>, <code>correct_index</code>.</span></div></div><div class="step"><b>5</b><div><strong>Нормализация</strong><span>Вопросы очищаются, валидируются и доводятся до нужного количества.</span></div></div></div></article><div class="col"><article class="card"><h3>Что влияет на качество генерации</h3><p>Полнота лекции, выбранная дисциплина, уровень сложности и качество тезисов напрямую влияют на итоговый набор вопросов.</p></article><article class="card"><h3>Зачем нужен fallback</h3><p>Если внешний AI недоступен или возвращает неполную структуру, система не срывает сценарий преподавателя и достраивает тест локальной логикой.</p></article><article class="card"><h3>Практический эффект</h3><p>Преподаватель получает не абстрактную магию AI, а инженерно управляемый инструмент, пригодный для реальной учебной работы.</p></article></div></div></section>
+<section class="slide" data-title="Сценарий преподавателя"><div class="head"><div class="copy"><div class="meta"><span>Слайд 07</span><span>Сценарий преподавателя</span></div><h2>Путь преподавателя в системе построен как последовательность рабочих шагов</h2></div><div class="num">07 / 19</div></div><div class="body full"><article class="flow"><h3>Полный маршрут преподавателя</h3><div class="flowtrack"><div class="step"><b>1</b><div><strong>Вход в личный кабинет</strong><span>Преподаватель получает доступ к дисциплинам, лекциям, тестам, студентам и аналитике.</span></div></div><div class="step"><b>2</b><div><strong>Создание дисциплины и лекции</strong><span>Учебный материал получает структуру и становится базой для контроля знаний.</span></div></div><div class="step"><b>3</b><div><strong>Генерация или ручной конструктор</strong><span>Тест создается автоматически по лекции либо собирается вручную.</span></div></div><div class="step"><b>4</b><div><strong>Редактирование и публикация</strong><span>После проверки содержания тест публикуется и может быть выдан по QR-коду.</span></div></div><div class="step"><b>5</b><div><strong>Получение аналитики</strong><span>После прохождения тестов система показывает средний балл, динамику и слабые места.</span></div></div></div></article></div></section>
+<section class="slide" data-title="Панель преподавателя"><div class="head"><div class="copy"><div class="meta"><span>Слайд 08</span><span>Рабочее пространство преподавателя</span></div><h2>После входа преподаватель сразу попадает в рабочее пространство проекта</h2></div><div class="num">08 / 19</div></div><div class="body wide two"><div class="col"><ul class="list"><li><strong>Единая панель</strong> объединяет дисциплины, студентов, тесты и личный кабинет преподавателя.</li><li><strong>Минимум лишних действий</strong> позволяет работать без перехода между разными сервисами ради одного занятия.</li><li><strong>Практическая ценность</strong> заключается в экономии времени и сохранении целостной картины курса.</li></ul><div class="chips"><button class="ghost" type="button" data-goto="9">Дисциплины и лекции</button><button class="ghost" type="button" data-goto="10">Создание теста</button><button class="ghost" type="button" data-goto="11">QR и публикация</button></div></div><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/dashboard</span></div><img src="presentation_assets/desktop/04_teacher_panel_desktop.png" alt="Панель преподавателя" /><figcaption>Реальный экран проекта: рабочее пространство преподавателя</figcaption></figure></div></section>
+<section class="slide" data-title="Дисциплины и лекции"><div class="head"><div class="copy"><div class="meta"><span>Слайд 09</span><span>Дисциплины и лекционный контур</span></div><h2>Работа с тестом начинается с дисциплины и лекционного материала</h2></div><div class="num">09 / 19</div></div><div class="body two"><div class="col"><article class="card"><h3>Предметная структура</h3><p>Дисциплина задает аналитический контекст: по ней агрегируются тесты, результаты группы и статистика обучающихся.</p></article><article class="card"><h3>Лекция как источник</h3><p>Лекционный текст становится основой для генерации вопросов и ручной подготовки содержания теста.</p></article><article class="card"><h3>Педагогическая связность</h3><p>Контроль знаний оказывается привязан к реальному материалу дисциплины, а не к абстрактному набору вопросов.</p></article></div><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/teacher/lectures</span></div><img src="presentation_assets/desktop/05_teacher_lectures_desktop.png" alt="Дисциплины и лекции" /><figcaption>Реальный экран проекта: дисциплины, лекции и связанные тесты преподавателя</figcaption></figure></div></section>
+<section class="slide" data-title="Ручной тест и редактор"><div class="head"><div class="copy"><div class="meta"><span>Слайд 10</span><span>Создание и редактирование теста</span></div><h2>КампусПлюс сочетает AI-генерацию и полноценный ручной конструктор</h2></div><div class="num">10 / 19</div></div><div class="body full"><div class="gallery"><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/teacher/tests/manual/new</span></div><img src="presentation_assets/desktop/16_teacher_manual_test_form_desktop.png" alt="Ручной конструктор теста" /><figcaption>Ручной конструктор: преподаватель задает вопрос, варианты и правильный ответ</figcaption></figure><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/teacher/tests/{id}/edit</span></div><img src="presentation_assets/desktop/06_teacher_tests_desktop.png" alt="Редактор теста" /><figcaption>Редактор теста: черновик, корректировка вопросов и последующая публикация</figcaption></figure></div><div class="grid3"><article class="card"><h3>Ручной режим важен</h3><p>Преподавателю нужен точный контроль над содержанием контрольных материалов.</p></article><article class="card"><h3>AI ускоряет старт</h3><p>Автоматическая генерация убирает рутину первичной заготовки банка вопросов.</p></article><article class="card"><h3>Итоговый баланс</h3><p>Сервис не заставляет выбирать между скоростью и качеством — доступны оба режима.</p></article></div></div></section>
+<section class="slide" data-title="QR и публикация"><div class="head"><div class="copy"><div class="meta"><span>Слайд 11</span><span>Публикация и запуск теста</span></div><h2>После публикации тест можно быстро выдать группе через QR-код</h2></div><div class="num">11 / 19</div></div><div class="body wide two"><article class="flow"><h3>Практический сценарий занятия</h3><div class="flowtrack"><div class="step"><b>1</b><div><strong>Публикация</strong><span>Тест переводится из черновика в доступный для прохождения режим.</span></div></div><div class="step"><b>2</b><div><strong>QR-код</strong><span>Преподаватель открывает точку входа для студентов прямо на занятии.</span></div></div><div class="step"><b>3</b><div><strong>Авторизация</strong><span>После входа или регистрации студент возвращается к нужному тесту.</span></div></div><div class="step"><b>4</b><div><strong>Результат</strong><span>Попытка автоматически попадает в аналитику дисциплины и преподавателя.</span></div></div></div></article><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/teacher/tests/{id}/qr</span></div><img src="presentation_assets/desktop/07_teacher_qr_desktop.png" alt="QR-код теста" /><figcaption>Реальный экран проекта: выдача опубликованного теста через QR-код</figcaption></figure></div></section>
+<section class="slide" data-title="Аналитика преподавателя"><div class="head"><div class="copy"><div class="meta"><span>Слайд 12</span><span>Аналитика преподавателя</span></div><h2>Система сразу переводит ответы студентов в наглядную групповую и персональную аналитику</h2></div><div class="num">12 / 19</div></div><div class="body full"><div class="gallery"><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/v2/teacher/analytics</span></div><img src="presentation_assets/desktop/10_student_analytics_desktop.png" alt="Групповая аналитика" /><figcaption>Групповой мониторинг: средний балл, статистика попыток и сравнение академических групп</figcaption></figure><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/v2/teacher/students/{id}/performance</span></div><img src="presentation_assets/desktop/14_teacher_student_performance_desktop.png" alt="Успеваемость студента" /><figcaption>Карточка студента: дисциплины, баллы, история прохождений и динамика результатов</figcaption></figure></div></div></section>
+<section class="slide" data-title="Сценарий студента"><div class="head"><div class="copy"><div class="meta"><span>Слайд 13</span><span>Сценарий студента</span></div><h2>Для студента система выглядит как понятный учебный маршрут, а не как перегруженная админ-панель</h2></div><div class="num">13 / 19</div></div><div class="body full"><div class="gallery"><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/dashboard</span></div><img src="presentation_assets/desktop/08_student_dashboard_desktop.png" alt="Кабинет студента" /><figcaption>Кабинет студента: дисциплины, история тестирования и личный прогресс</figcaption></figure><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/student/tests</span></div><img src="presentation_assets/desktop/09_student_tests_desktop.png" alt="Тесты студента" /><figcaption>Список доступных тестов и предметов, с которыми работает конкретный студент</figcaption></figure></div><div class="grid3"><article class="card"><h3>Простота входа</h3><p>Студент быстро попадает в свой кабинет и продолжает учебный сценарий без лишних действий.</p></article><article class="card"><h3>Прозрачность результата</h3><p>Баллы, история попыток и предметный контекст показаны в одной структуре.</p></article><article class="card"><h3>Практическая польза</h3><p>Система показывает не только итог, но и направление дальнейшей подготовки.</p></article></div></div></section>
+<section class="slide" data-title="Точки роста и работа с мобильных устройств"><div class="head"><div class="copy"><div class="meta"><span>Слайд 14</span><span>Точки роста и работа с мобильных устройств</span></div><h2>Платформа показывает студенту слабые темы и сохраняет удобство работы с мобильных устройств</h2></div><div class="num">14 / 19</div></div><div class="body wide two"><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/growth</span></div><img src="presentation_assets/desktop/15_student_growth_desktop.png" alt="Точки роста студента" /><figcaption>Реальный экран проекта: персональные точки роста по результатам тестирования</figcaption></figure><div class="col"><div class="phones"><figure class="phone"><img src="mobile_screens/03_login_mobile.png" alt="Вход с мобильного устройства" /><span>Вход</span></figure><figure class="phone"><img src="mobile_screens/10_student_dashboard_mobile.png" alt="Личный кабинет на мобильном устройстве" /><span>Кабинет</span></figure><figure class="phone"><img src="mobile_screens/11_student_tests_mobile.png" alt="Тесты на мобильном устройстве" /><span>Тесты</span></figure><figure class="phone"><img src="mobile_screens/01_home_mobile.png" alt="Главная страница на мобильном устройстве" /><span>Главная</span></figure></div><article class="card"><h3>Поддержка мобильных устройств повышает доступность сервиса</h3><p>Именно этот контур делает QR-модель на занятии практичной: обучающийся получает доступ к тесту сразу с мобильного устройства без дополнительной логистики и без отдельной LMS.</p></article></div></div></section>
+<section class="slide" data-title="Роль администратора"><div class="head"><div class="copy"><div class="meta"><span>Слайд 15</span><span>Роль администратора</span></div><h2>Администратор поддерживает организационный контур и целостность структуры данных</h2></div><div class="num">15 / 19</div></div><div class="body full"><div class="gallery"><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/admin/students</span></div><img src="presentation_assets/desktop/11_admin_students_desktop.png" alt="Студенты в админке" /><figcaption>Администратор управляет пользователями и видит структуру обучающихся по группам</figcaption></figure><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>/admin/groups</span></div><img src="presentation_assets/desktop/12_admin_groups_desktop.png" alt="Группы в админке" /><figcaption>Группы, преподаватели и организационная структура поддерживаются централизованно</figcaption></figure></div><div class="grid3"><article class="card"><h3>Роли и доступы</h3><p>Каждый пользователь получает только те возможности, которые соответствуют его роли в системе.</p></article><article class="card"><h3>Группы и дисциплины</h3><p>Администратор отвечает за корректные связи между группами, преподавателями и предметами.</p></article><article class="card"><h3>Управляемость</h3><p>Даже при росте числа пользователей платформа сохраняет прозрачную и контролируемую структуру.</p></article></div></div></section>
+<section class="slide" data-title="Практическая значимость"><div class="head"><div class="copy"><div class="meta"><span>Слайд 16</span><span>Практическая значимость</span></div><h2>Проект имеет прикладную ценность для СГУГиТ и может использоваться как рабочий цифровой инструмент</h2></div><div class="num">16 / 19</div></div><div class="body two"><div class="col"><article class="card"><h3>Для преподавателя</h3><p>Экономия времени на подготовке контроля знаний и мгновенная аналитика по дисциплине и группе.</p></article><article class="card"><h3>Для студента</h3><p>Понятный маршрут от дисциплины и теста к баллу, истории попыток и точкам роста.</p></article><article class="card"><h3>Для вуза</h3><p>Цифровизация учебного процесса без тяжелой инфраструктуры и с возможностью размещения на локальном хосте.</p></article></div><article class="tablewrap"><table class="table"><thead><tr><th>Показатель</th><th>Эффект от внедрения</th></tr></thead><tbody><tr><td><strong>Создание контроля</strong></td><td>Автоматическая генерация и ручной конструктор в одном интерфейсе.</td></tr><tr><td><strong>Запуск на занятии</strong></td><td>Публикация и QR-доступ без отдельной логистики.</td></tr><tr><td><strong>Аналитика</strong></td><td>Данные по группе, дисциплине и студенту доступны сразу после прохождения.</td></tr><tr><td><strong>Развёртывание</strong></td><td>Сервис уже работает как веб-приложение и готов к переносу на учебный сервер.</td></tr><tr><td><strong>Масштабирование</strong></td><td>Текущая версия закрывает MVP, следующий этап — перевод на PostgreSQL.</td></tr></tbody></table></article></div></section>
+<section class="slide" data-title="Надежность и безопасность"><div class="head"><div class="copy"><div class="meta"><span>Слайд 17</span><span>Надежность и безопасность</span></div><h2>Качество платформы определяется не только функциональностью, но и корректной авторизацией</h2></div><div class="num">17 / 19</div></div><div class="body full"><div class="grid4"><article class="card"><h3>Изоляция сессий</h3><p>При новом входе старая сессия очищается полностью, поэтому другой пользователь не наследует устаревшие права и данные.</p><span class="ok">Исправлено</span></article><article class="card"><h3>Собственная cookie проекта</h3><p>Для системы используется отдельная cookie-сессия <code>campusplus_session</code>, что безопаснее при размещении на общем хосте.</p><span class="ok">Исправлено</span></article><article class="card"><h3>Анти-кэш персональных страниц</h3><p>Динамические ответы помечаются заголовками <code>no-store</code> и <code>Vary: Cookie</code>, чтобы исключить показ чужих экранов из кэша.</p><span class="ok">Исправлено</span></article><article class="card"><h3>Проверка ролей в legacy-маршрутах</h3><p>Даже старые административные маршруты теперь опираются не только на флаг сессии, но и на фактическую роль текущего пользователя.</p><span class="ok">Исправлено</span></article></div><article class="quote"><h3>Инженерный вывод</h3><p>КампусПлюс развивается не как макет интерфейса, а как реальный веб-сервис: критические баги воспроизводятся, закрываются кодом и фиксируются регрессионными сценариями.</p></article></div></section>
+<section class="slide" data-title="Направления развития"><div class="head"><div class="copy"><div class="meta"><span>Слайд 18</span><span>Направления развития</span></div><h2>Следующий этап — развитие платформы из дипломного проекта в устойчивый учебный продукт</h2></div><div class="num">18 / 19</div></div><div class="body full"><div class="grid3"><article class="card"><h3>PostgreSQL и production-эксплуатация</h3><p>Переход на серверную БД позволит безопасно хранить данные между деплоями и масштабировать эксплуатацию.</p></article><article class="card"><h3>Расширение конструктора тестов</h3><p>Можно добавить типы вопросов, шаблоны, импорт из файлов и совместное редактирование материалов.</p></article><article class="card"><h3>Углубление аналитики</h3><p>Перейти от базовых метрик к прогнозированию риска, сравнительному анализу потоков и предметных траекторий.</p></article><article class="card"><h3>Интеграция в инфраструктуру СГУГиТ</h3><p>Размещение на вузовском хосте и включение в реальный учебный процесс — логичный следующий шаг.</p></article><article class="card"><h3>Дополнительные каналы доступа</h3><p>Перспективны связки с внутренними порталами, университетскими кабинетами и мобильными сценариями входа.</p></article><article class="card"><h3>Методическая библиотека</h3><p>На основе дисциплин, лекций и тестов может быть сформирован кафедральный банк цифрового контента.</p></article></div></div></section>
+<section class="slide" data-title="Заключение"><div class="head"><div class="copy"><div class="meta"><span>Слайд 19</span><span>Заключение</span></div><h2>КампусПлюс решает реальную прикладную задачу цифрового сопровождения контроля знаний</h2></div><div class="num">19 / 19</div></div><div class="body wide two"><div class="col"><article class="quote"><h3>Основной вывод</h3><p>Платформа объединяет лекционный контент, генерацию тестов, ручной конструктор, QR-доступ, аналитику результатов и административный контур в одном прикладном веб-сервисе.</p></article><ul class="list"><li><strong>Для преподавателя</strong> — экономия времени и прозрачность контроля знаний.</li><li><strong>Для студента</strong> — понятный маршрут прохождения тестов и роста по дисциплине.</li><li><strong>Для СГУГиТ</strong> — реалистичный шаг к цифровизации мониторинга успеваемости.</li></ul><div class="actions"><button class="action" type="button" data-goto="0">К титульному слайду</button><button class="ghost" type="button" id="openDemo">Открыть демонстрационный стенд</button></div></div><figure class="screen"><div class="screenhd"><span class="dots"><i></i><i></i><i></i></span><span>campusplus.onrender.com</span></div><img src="presentation_assets/desktop/04_teacher_panel_desktop.png" alt="Финальный экран проекта" /><figcaption>Спасибо за внимание</figcaption></figure></div></section>
+<div class="footer"><div class="counter" id="counter">01 / 19</div><div class="progress"><span id="progressBar"></span></div></div></div></div>
+<div class="lightbox" id="lightbox" aria-hidden="true"><button class="close" id="closeLightbox" type="button" aria-label="Закрыть">×</button><figure><img id="lightboxImage" alt="" /><figcaption id="lightboxCaption"></figcaption></figure></div>
+<script>
+const deck = document.querySelector('.deck');
+const slides = [...document.querySelectorAll('.slide')];
+const counter = document.getElementById('counter');
+const progressBar = document.getElementById('progressBar');
+const lightbox = document.getElementById('lightbox');
+const lightboxImage = document.getElementById('lightboxImage');
+const lightboxCaption = document.getElementById('lightboxCaption');
+const closeLightbox = document.getElementById('closeLightbox');
+const openDemo = document.getElementById('openDemo');
+let current = 0;
+
+function pad(value) {
+  return String(value).padStart(2, '0');
+}
+
+function show(index) {
+  const nextIndex = Math.max(0, Math.min(index, slides.length - 1));
+  slides[current].classList.remove('active');
+  current = nextIndex;
+  slides[current].classList.add('active');
+  counter.textContent = `${pad(current + 1)} / ${pad(slides.length)}`;
+  progressBar.style.width = `${((current + 1) / slides.length) * 100}%`;
+  document.title = `${slides[current].dataset.title} — КампусПлюс`;
+}
+
+function captionOf(img) {
+  const figure = img.closest('figure');
+  const caption = figure ? figure.querySelector('figcaption,span') : null;
+  return caption ? caption.textContent.trim() : (img.alt || '');
+}
+
+function openImage(img) {
+  lightboxImage.src = img.currentSrc || img.src;
+  lightboxImage.alt = img.alt || '';
+  lightboxCaption.textContent = captionOf(img);
+  lightbox.classList.add('open');
+  lightbox.setAttribute('aria-hidden', 'false');
+}
+
+function closeImage() {
+  lightbox.classList.remove('open');
+  lightbox.setAttribute('aria-hidden', 'true');
+  lightboxImage.src = '';
+}
+
+document.querySelectorAll('.screen img,.phone img').forEach((img) => {
+  img.addEventListener('click', () => openImage(img));
+});
+
+document.querySelectorAll('[data-goto]').forEach((btn) => {
+  btn.addEventListener('click', () => show(Number(btn.dataset.goto)));
+});
+
+closeLightbox.addEventListener('click', closeImage);
+lightbox.addEventListener('click', (event) => {
+  if (event.target === lightbox) closeImage();
+});
+
+if (openDemo) {
+  openDemo.addEventListener('click', () => {
+    window.open('https://campusplus.onrender.com/', '_blank', 'noopener,noreferrer');
+  });
+}
+
+let touchStartX = 0;
+document.addEventListener('touchstart', (event) => {
+  touchStartX = event.changedTouches[0].screenX;
+}, { passive: true });
+
+document.addEventListener('touchend', (event) => {
+  if (lightbox.classList.contains('open')) return;
+  const delta = touchStartX - event.changedTouches[0].screenX;
+  if (Math.abs(delta) < 48) return;
+  show(delta > 0 ? current + 1 : current - 1);
+}, { passive: true });
+
+document.addEventListener('keydown', (event) => {
+  if (lightbox.classList.contains('open')) {
+    if (event.key === 'Escape') closeImage();
+    return;
+  }
+  if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {
+    event.preventDefault();
+    show(current + 1);
+  }
+  if (['ArrowLeft', 'PageUp'].includes(event.key)) {
+    event.preventDefault();
+    show(current - 1);
+  }
+  if (event.key === 'Home') show(0);
+  if (event.key === 'End') show(slides.length - 1);
+});
+
+deck.addEventListener('click', (event) => {
+  if (lightbox.classList.contains('open')) return;
+  if (event.target.closest('button, a, img, .lightbox')) return;
+  const rect = deck.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  if (x < rect.width * 0.18) show(current - 1);
+  else if (x > rect.width * 0.82) show(current + 1);
+});
+
+show(0);
+</script>
+</body></html>
+
+
+
+
+
+
+
