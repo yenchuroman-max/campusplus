@@ -15,9 +15,11 @@
     <button class="button" type="submit">Войти</button>
     <a class="button secondary" href="/register{% if next %}?next={{ next }}{% endif %}">Зарегистрироваться</a>
   </form>
-  <div class="auth-help">
-    <strong>Забыли пароль?</strong>
-    <span>Студенту нужно обратиться к своему преподавателю, преподавателю и администратору — к администратору системы. Вам выдадут временный пароль для входа.</span>
-  </div>
+  <details class="auth-help-disclosure">
+    <summary class="auth-help-toggle">Забыли пароль?</summary>
+    <div class="auth-help">
+      <span>Обратитесь к своему преподавателю, если вы студент. Преподавателю и администратору нужно обратиться к администратору системы. Вам выдадут временный пароль для входа.</span>
+    </div>
+  </details>
 </div>
 {% endblock %}

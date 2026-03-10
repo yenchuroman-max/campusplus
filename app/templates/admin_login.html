@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>РљР°РјРїСѓСЃРџР»СЋСЃ РЎР“РЈР“РёРў вЂ” РІС…РѕРґ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°</title>
+    <title>КампусПлюс СГУГиТ — вход администратора</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/static/img/sgugit-mark.png?v=3" />
     <link rel="shortcut icon" href="/favicon.ico?v=3" />
     <link rel="apple-touch-icon" href="/static/img/sgugit-mark.png?v=3" />
@@ -12,19 +12,21 @@
   <body>
     <main class="container">
       <div class="card narrow">
-        <h2>РђРґРјРёРЅ-РїР°РЅРµР»СЊ вЂ” РІС…РѕРґ</h2>
+        <h2>Вход администратора</h2>
         {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-        <form method="post" action="{{ login_action if login_action else '/v2/admin/login' }}">
-          <label>Р›РѕРіРёРЅ</label>
+        <form method="post" action="{{ login_action if login_action else '/v2/admin/login' }}" class="auth-form">
+          <label>Логин</label>
           <input type="text" name="login" value="{{ login if login else '' }}" required />
-          <label>РџР°СЂРѕР»СЊ</label>
+          <label>Пароль</label>
           <input type="password" name="password" required />
-          <button class="button" type="submit">Р’РѕР№С‚Рё</button>
+          <button class="button" type="submit">Войти</button>
         </form>
-        <div class="auth-help">
-          <strong>Забыли пароль?</strong>
-          <span>Для административной учетной записи нужен сброс пароля через другого администратора системы.</span>
-        </div>
+        <details class="auth-help-disclosure">
+          <summary class="auth-help-toggle">Забыли пароль?</summary>
+          <div class="auth-help">
+            <span>Обратитесь к другому администратору системы. Он сможет сбросить пароль и выдать временный пароль для входа.</span>
+          </div>
+        </details>
       </div>
     </main>
   </body>
