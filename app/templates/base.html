@@ -4,10 +4,48 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title if title else "КампусПлюс СГУГиТ" }}</title>
-    <link rel="icon" type="image/png" href="/static/img/sgugit-mark.png" />
-    <link rel="shortcut icon" href="/static/img/sgugit-mark.png" />
-    <link rel="apple-touch-icon" href="/static/img/sgugit-mark.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/img/sgugit-mark.png?v=3" data-favicon="icon-32" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/img/sgugit-mark.png?v=3" data-favicon="icon-192" />
+    <link rel="shortcut icon" href="/favicon.ico?v=3" data-favicon="shortcut" />
+    <link rel="apple-touch-icon" href="/static/img/sgugit-mark.png?v=3" data-favicon="apple" />
     <script>
+      (function () {
+        var faviconDefs = [
+          { key: "icon-32", rel: "icon", type: "image/png", sizes: "32x32", href: "/static/img/sgugit-mark.png?v=3" },
+          { key: "icon-192", rel: "icon", type: "image/png", sizes: "192x192", href: "/static/img/sgugit-mark.png?v=3" },
+          { key: "shortcut", rel: "shortcut icon", href: "/favicon.ico?v=3" },
+          { key: "apple", rel: "apple-touch-icon", href: "/static/img/sgugit-mark.png?v=3" }
+        ];
+
+        function applyFaviconLinks() {
+          for (var i = 0; i < faviconDefs.length; i++) {
+            var def = faviconDefs[i];
+            var selector = 'link[data-favicon="' + def.key + '"]';
+            var link = document.head.querySelector(selector);
+            if (!link) {
+              link = document.createElement("link");
+              link.setAttribute("data-favicon", def.key);
+              document.head.appendChild(link);
+            }
+            link.setAttribute("rel", def.rel);
+            link.setAttribute("href", def.href);
+            if (def.type) {
+              link.setAttribute("type", def.type);
+            } else {
+              link.removeAttribute("type");
+            }
+            if (def.sizes) {
+              link.setAttribute("sizes", def.sizes);
+            } else {
+              link.removeAttribute("sizes");
+            }
+          }
+        }
+
+        applyFaviconLinks();
+        window.addEventListener("pageshow", applyFaviconLinks);
+      })();
+
       (function () {
         var key = "ui-theme";
         var theme = "light";

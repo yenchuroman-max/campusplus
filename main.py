@@ -23,7 +23,7 @@ except Exception:
     load_dotenv = None
 
 from app.ai import diagnose_ai_setup, generate_growth_topics, generate_questions
-from app.db import connect, init_db
+from app.db import connect, init_db, insert_ignore
 from app.lecture_import import (
     LectureImportError,
     extract_lecture_text,
@@ -33,6 +33,7 @@ from app.lecture_import import (
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
+FAVICON_PATH = Path(__file__).resolve().parent / "app" / "static" / "img" / "sgugit-mark.png"
 from app.security import (
     CSRF_FIELD_NAME,
     generate_csrf_token,
@@ -640,6 +641,11 @@ app.include_router(api_router)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(FAVICON_PATH, media_type="image/png")
 
 def get_current_user(request: Request) -> dict | None:
     user_id = request.session.get("user_id")
@@ -4266,11 +4272,15 @@ def v2_teacher_create_discipline(request: Request, discipline_name: str = Form(.
     cur = conn.cursor()
     try:
         discipline_id, created = create_or_get_discipline(cur, normalized_name)
-        cur.execute(
-            "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
-            (user["id"], discipline_id),
+        assigned = bool(
+            insert_ignore(
+                cur,
+                "teacher_disciplines",
+                ("teacher_id", "discipline_id"),
+                (user["id"], discipline_id),
+                conflict_columns=("teacher_id", "discipline_id"),
+            )
         )
-        assigned = cur.rowcount > 0
         conn.commit()
     except Exception:
         conn.close()
@@ -4317,11 +4327,15 @@ def v2_teacher_attach_discipline(request: Request, discipline_id: int = Form(...
         add_flash(request, "Дисциплина не найдена", "error")
         return RedirectResponse("/v2/teacher/disciplines", status_code=302)
 
-    cur.execute(
-        "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
-        (user["id"], discipline_id),
+    linked = bool(
+        insert_ignore(
+            cur,
+            "teacher_disciplines",
+            ("teacher_id", "discipline_id"),
+            (user["id"], discipline_id),
+            conflict_columns=("teacher_id", "discipline_id"),
+        )
     )
-    linked = cur.rowcount > 0
     conn.commit()
     conn.close()
 
