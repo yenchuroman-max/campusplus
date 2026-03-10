@@ -1005,6 +1005,25 @@ class TestAdminFlow:
         assert teacher_one not in teacher_ids
         assert teacher_two in teacher_ids
 
+    def test_admin_can_delete_empty_group_and_cleanup_links(self, client, db):
+        self._setup_admin(client, db)
+        teacher_id = _insert_user(db, role="teacher", login="g7@test.ru", password="pass123", full_name="Teacher Seven")
+        _create_group(db, "БИ-99.9", teacher_id)
+        cur = db.cursor()
+        cur.execute("SELECT id FROM disciplines ORDER BY id LIMIT 1")
+        discipline_id = int(cur.fetchone()[0])
+        _link_teacher_discipline_group(db, teacher_id, "БИ-99.9", discipline_id)
+
+        r = client.post("/admin/groups/БИ-99.9/delete", follow_redirects=False)
+        assert r.status_code == 302
+
+        cur.execute("SELECT 1 FROM groups WHERE name = ?", ("БИ-99.9",))
+        assert cur.fetchone() is None
+        cur.execute("SELECT 1 FROM group_teachers WHERE group_name = ?", ("БИ-99.9",))
+        assert cur.fetchone() is None
+        cur.execute("SELECT 1 FROM teaching_assignments WHERE group_name = ?", ("БИ-99.9",))
+        assert cur.fetchone() is None
+
     def test_admin_disciplines_page(self, client, db):
         self._setup_admin(client, db)
         r = client.get("/admin/disciplines")

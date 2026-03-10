@@ -255,6 +255,27 @@ def remove_group_teacher(cur, group_name: str, teacher_id: int) -> bool:
     return True
 
 
+def delete_group_if_empty(cur, group_name: str) -> tuple[bool, str]:
+    normalized = normalize_group_name(group_name)
+    if not normalized or normalized == "Без группы":
+        return False, "Эту группу удалить нельзя"
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM users WHERE role = 'student' AND student_group = ?",
+        (normalized,),
+    )
+    row = cur.fetchone()
+    student_count = int(row["cnt"]) if row and row["cnt"] is not None else 0
+    if student_count > 0:
+        return False, "Сначала уберите студентов из группы"
+    cur.execute("DELETE FROM teaching_assignments WHERE group_name = ?", (normalized,))
+    cur.execute("DELETE FROM group_teachers WHERE group_name = ?", (normalized,))
+    cur.execute("DELETE FROM groups WHERE name = ?", (normalized,))
+    deleted = cur.rowcount > 0
+    if not deleted:
+        return False, "Группа не найдена"
+    return True, "Группа удалена"
+
+
 def get_discipline_map(cur) -> dict[int, str]:
     cur.execute("SELECT id, name FROM disciplines ORDER BY name")
     return {int(row["id"]): row["name"] for row in cur.fetchall()}
@@ -4189,6 +4210,21 @@ def v1_admin_unbind_group_teacher(request: Request, group_name: str, teacher_id:
     return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
 
 
+@app.post("/v1/admin/groups/{group_name}/delete")
+def v1_admin_delete_group(request: Request, group_name: str):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    deleted, message = delete_group_if_empty(cur, name)
+    conn.commit()
+    conn.close()
+    audit_log(request, "delete_group", details=f"group={name}, deleted={deleted}")
+    add_flash(request, message, "success" if deleted else "error")
+    return RedirectResponse("/v1/admin/groups", status_code=302)
+
+
 @app.post("/admin/groups/{group_name}/teachers/{teacher_id}/delete")
 def admin_unbind_group_teacher(request: Request, group_name: str, teacher_id: int):
     ensure_start_session_cookie(request)
@@ -4207,6 +4243,23 @@ def admin_unbind_group_teacher(request: Request, group_name: str, teacher_id: in
     else:
         add_flash(request, "Связь преподавателя с группой не найдена", "info")
     return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
+
+
+@app.post("/admin/groups/{group_name}/delete")
+def admin_delete_group(request: Request, group_name: str):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    deleted, message = delete_group_if_empty(cur, name)
+    conn.commit()
+    conn.close()
+    audit_log(request, "delete_group", details=f"group={name}, deleted={deleted}")
+    add_flash(request, message, "success" if deleted else "error")
+    return RedirectResponse("/admin/groups", status_code=302)
 
 
 @app.post("/v1/admin/groups/assign")
