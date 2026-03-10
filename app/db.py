@@ -75,11 +75,13 @@ class PostgresCursorAdapter:
     def __init__(self, raw_cursor):
         self._cur = raw_cursor
         self.lastrowid: int | None = None
+        self.rowcount: int = 0
 
     def execute(self, query: str, params: tuple | list | None = None):
         sql = _rewrite_placeholders(query)
         self._cur.execute(sql, params or ())
         self.lastrowid = None
+        self.rowcount = int(getattr(self._cur, "rowcount", 0) or 0)
         if sql.lstrip().lower().startswith("insert") and "returning" not in sql.lower():
             match = re.match(r"\s*insert\s+into\s+([a-zA-Z_][\w]*)", sql, flags=re.IGNORECASE)
             table_name = match.group(1).lower() if match else ""
@@ -94,7 +96,7 @@ class PostgresCursorAdapter:
                 "answers",
                 "audit",
             }
-            if table_name not in auto_id_tables:
+            if table_name not in auto_id_tables or self.rowcount <= 0:
                 return self
             try:
                 self._cur.execute("SELECT LASTVAL() AS last_id")
@@ -109,6 +111,7 @@ class PostgresCursorAdapter:
         sql = _rewrite_placeholders(query)
         self._cur.executemany(sql, seq_of_params)
         self.lastrowid = None
+        self.rowcount = int(getattr(self._cur, "rowcount", 0) or 0)
         return self
 
     def fetchone(self):
