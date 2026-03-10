@@ -33,4 +33,10 @@
     <a class="button secondary" href="{{ base_prefix }}/{{ cancel_page }}">Отмена</a>
   </div>
 </form>
+{% if current_user and current_user.id != user.id %}
+<form method="post" action="{{ base_prefix }}/users/{{ user.id }}/reset_password" style="margin-top:12px;" onsubmit="return confirm('Сбросить пароль и выдать пользователю временный пароль?');">
+  <input type="hidden" name="next" value="{{ request.url.path }}" />
+  <button class="button secondary" type="submit">Сбросить пароль</button>
+</form>
+{% endif %}
 {% endblock %}

@@ -23,5 +23,9 @@
       <a class="button secondary" href="/v2/teacher/students">Отмена</a>
     </div>
   </form>
+  <form method="post" action="/v2/teacher/students/{{ student.id }}/reset_password" style="margin-top:12px;" onsubmit="return confirm('Сбросить пароль студента и выдать временный пароль?');">
+    <input type="hidden" name="next" value="{{ request.url.path }}" />
+    <button class="button secondary" type="submit">Сбросить пароль</button>
+  </form>
 </div>
 {% endblock %}

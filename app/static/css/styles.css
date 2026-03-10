@@ -1585,6 +1585,28 @@ input[type="file"]::file-selector-button {
   background-clip: text;
 }
 
+.auth-help {
+  margin-top: var(--sp-4);
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-2);
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.auth-help strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.profile-reset-note {
+  margin-top: 10px;
+}
+
 /* Custom select */
 .custom-select { position: relative; margin-bottom: var(--sp-4); }
 .custom-select-trigger {
@@ -2394,6 +2416,16 @@ html[data-theme="light"] .review-link-default {
 
 html[data-theme="light"] .review-link-default:hover {
   color: #8b3d4d;
+}
+
+html[data-theme="light"] .auth-help {
+  border-color: rgba(120, 138, 170, 0.20);
+  background: rgba(15, 23, 42, 0.03);
+  color: #5b6f8d;
+}
+
+html[data-theme="light"] .auth-help strong {
+  color: #1f2a3d;
 }
 
 html[data-theme="light"] .review-link-success {

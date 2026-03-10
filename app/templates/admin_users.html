@@ -71,6 +71,10 @@
                 {% if mode == 'v1_teacher' %}
                 <a class="button secondary" href="/v1/teacher/users/{{ u.id }}/performance">Успеваемость</a>
                 {% endif %}
+                <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/reset_password" onsubmit="return confirm('Сбросить пароль и выдать временный пароль пользователю?');" style="margin:0;">
+                  <input type="hidden" name="next" value="{{ request.url.path }}" />
+                  <button class="button secondary" type="submit">Сбросить пароль</button>
+                </form>
                 {% if mode in ['admin', 'v1_admin'] %}
                 <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя? Это действие необратимо.');" style="margin:0;">
                   <button class="button danger" type="submit">Удалить</button>
@@ -104,6 +108,10 @@
         </div>
         <div class="card-footer actions-inline">
           <a class="button secondary" href="{{ base_prefix }}/users/{{ u.id }}/edit">Редактировать</a>
+          <form method="post" action="{{ base_prefix }}/users/{{ u.id }}/reset_password" onsubmit="return confirm('Сбросить пароль и выдать временный пароль пользователю?');" style="margin:0;">
+            <input type="hidden" name="next" value="{{ request.url.path }}" />
+            <button class="button secondary" type="submit">Сбросить пароль</button>
+          </form>
         </div>
       </div>
       {% else %}

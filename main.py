@@ -1,21 +1,26 @@
 ﻿from __future__ import annotations
 
 import asyncio
+from base64 import b64decode
 from datetime import datetime
 import json
 import os
 import re
+import secrets
 import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote_plus
 
+import itsdangerous
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from itsdangerous.exc import BadSignature
 
 try:
     from dotenv import load_dotenv
@@ -626,10 +631,11 @@ app = FastAPI(
 )
 _session_secret = os.environ.get("SESSION_SECRET_KEY") or os.environ.get("SECRET_KEY") or "dev-secret-change-me"
 _session_cookie_secure, _session_cookie_samesite, _session_cookie_max_age = _session_cookie_settings()
+_session_cookie_name = "campusplus_session"
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret,
-    session_cookie="campusplus_session",
+    session_cookie=_session_cookie_name,
     same_site=_session_cookie_samesite,
     https_only=_session_cookie_secure,
     max_age=_session_cookie_max_age,
@@ -647,26 +653,111 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 def favicon() -> FileResponse:
     return FileResponse(FAVICON_PATH, media_type="image/png")
 
+
+def _coerce_session_version(value: Any, default: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        return default
+    return parsed if parsed > 0 else default
+
+
 def get_current_user(request: Request) -> dict | None:
     user_id = request.session.get("user_id")
     if not user_id:
         return None
+    session_version = _coerce_session_version(request.session.get("session_version"), default=0)
     conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     row = cur.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        request.session.clear()
+        return None
+
+    db_session_version = _coerce_session_version(row["session_version"])
+    if session_version != db_session_version:
+        request.session.clear()
+        return None
+
+    return dict(row)
 
 
-def establish_user_session(request: Request, *, user_id: int, email: str, role: str) -> None:
+def establish_user_session(
+    request: Request,
+    *,
+    user_id: int,
+    email: str,
+    role: str,
+    session_version: int = 1,
+) -> None:
     # Always reset the signed session when switching identities.
     request.session.clear()
     request.session["user_id"] = int(user_id)
     request.session["user_email"] = email
+    request.session["session_version"] = _coerce_session_version(session_version)
     if role == "admin":
         request.session["admin_authenticated"] = True
         request.session["admin_email"] = email
+
+
+TEMP_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!_-"
+PASSWORD_CHANGE_ALLOWED_PATHS = {
+    "/dashboard",
+    "/dashboard/profile/password",
+    "/login",
+    "/logout",
+    "/v1/admin/logout",
+    "/v2/admin",
+    "/v2/admin/login",
+    "/favicon.ico",
+}
+
+
+def user_must_change_password(user: dict | Any | None) -> bool:
+    if not user:
+        return False
+    if hasattr(user, "keys"):
+        try:
+            value = user["must_change_password"]
+        except Exception:
+            value = None
+    else:
+        value = user.get("must_change_password") if hasattr(user, "get") else None
+    try:
+        return bool(int(value or 0))
+    except Exception:
+        return bool(value)
+
+
+def generate_temporary_password(length: int = 12) -> str:
+    while True:
+        password = "".join(secrets.choice(TEMP_PASSWORD_ALPHABET) for _ in range(length))
+        ok, _ = validate_password(password)
+        if ok:
+            return password
+
+
+def set_user_password(cur, user_id: int, password: str, *, force_change: bool = False) -> int:
+    salt = new_salt()
+    password_hash = hash_password(password, salt)
+    cur.execute(
+        """
+        UPDATE users
+        SET password_hash = ?,
+            salt = ?,
+            must_change_password = ?,
+            session_version = COALESCE(session_version, 1) + 1
+        WHERE id = ?
+        """,
+        (password_hash, salt, 1 if force_change else 0, user_id),
+    )
+    cur.execute("SELECT session_version FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    if row:
+        return _coerce_session_version(row["session_version"])
+    return 1
 
 
 def require_user(request: Request) -> dict:
@@ -714,6 +805,70 @@ def add_flash(request: Request, message: str, level: str = "info") -> None:
     fs = request.session.get("flashes") or []
     fs.append({"message": message, "level": level})
     request.session["flashes"] = fs
+
+
+def add_flash_once(request: Request, message: str, level: str = "info") -> None:
+    fs = request.session.get("flashes") or []
+    if any(item.get("message") == message and item.get("level") == level for item in fs):
+        return
+    fs.append({"message": message, "level": level})
+    request.session["flashes"] = fs
+
+
+class ForcePasswordChangeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path or "/"
+        if path.startswith("/static") or path in PASSWORD_CHANGE_ALLOWED_PATHS:
+            return await call_next(request)
+
+        raw_cookie = request.cookies.get(_session_cookie_name)
+        user_id = None
+        session_version = 0
+        if raw_cookie:
+            signer = itsdangerous.TimestampSigner(str(_session_secret))
+            try:
+                unsigned = signer.unsign(raw_cookie.encode("utf-8"), max_age=_session_cookie_max_age)
+                session_data = json.loads(b64decode(unsigned))
+                user_id = int(session_data.get("user_id") or 0) or None
+                session_version = _coerce_session_version(session_data.get("session_version"), default=0)
+            except (BadSignature, ValueError, TypeError, json.JSONDecodeError):
+                user_id = None
+        if not user_id:
+            return await call_next(request)
+
+        conn = connect()
+        cur = conn.cursor()
+        cur.execute("SELECT must_change_password, session_version FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        conn.close()
+
+        raw_value = None
+        db_session_version = 0
+        if row:
+            if hasattr(row, "keys"):
+                raw_value = row["must_change_password"]
+                db_session_version = _coerce_session_version(row["session_version"], default=0)
+            else:
+                raw_value = row[0]
+                db_session_version = _coerce_session_version(row[1], default=0)
+
+        if not row or session_version != db_session_version:
+            response = RedirectResponse("/login", status_code=302)
+            response.delete_cookie(_session_cookie_name, path="/")
+            return response
+
+        try:
+            must_change = bool(int(raw_value or 0))
+        except Exception:
+            must_change = bool(raw_value)
+
+        if must_change:
+            return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+        return await call_next(request)
+
+
+app.add_middleware(ForcePasswordChangeMiddleware)
 
 
 def _safe_next_path(raw: str | None, default: str = "/dashboard") -> str:
@@ -1065,7 +1220,7 @@ def register(
         conn.close()
         return _render_register_form(request, "Логин уже используется.", form_state, next_path=next_path)
     conn.close()
-    establish_user_session(request, user_id=user_id, email=clean_login, role="student")
+    establish_user_session(request, user_id=user_id, email=clean_login, role="student", session_version=1)
     add_flash(request, "Регистрация успешна.", "success")
     if next_path:
         return RedirectResponse(next_path, status_code=302)
@@ -1154,7 +1309,20 @@ def login(
     cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.utcnow().isoformat(), row["id"]))
     conn.commit()
     conn.close()
-    establish_user_session(request, user_id=row["id"], email=row["email"], role=row["role"])
+    establish_user_session(
+        request,
+        user_id=row["id"],
+        email=row["email"],
+        role=row["role"],
+        session_version=_coerce_session_version(row["session_version"]),
+    )
+    if user_must_change_password(row):
+        add_flash_once(
+            request,
+            "Пароль был сброшен. Используйте временный пароль, выданный преподавателем или администратором, и сразу задайте новый пароль в личном кабинете.",
+            "error",
+        )
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
     if row["role"] == "admin":
         return RedirectResponse("/admin/students", status_code=302)
     if row["role"] == "teacher" and not next_path:
@@ -1179,7 +1347,7 @@ def dashboard(request: Request):
     if not user:
         return RedirectResponse("/login", status_code=302)
 
-    context: dict[str, Any] = {}
+    context: dict[str, Any] = {"password_reset_required": user_must_change_password(user)}
     if user["role"] == "student":
         conn = connect()
         cur = conn.cursor()
@@ -1303,7 +1471,14 @@ def dashboard_update_password(
         return RedirectResponse("/login", status_code=302)
 
     if not verify_password(current_password, user["salt"], user["password_hash"]):
-        add_flash(request, "Текущий пароль указан неверно.", "error")
+        if user_must_change_password(user):
+            add_flash(
+                request,
+                "Текущий пароль указан неверно. После сброса нужно ввести временный пароль, который выдал преподаватель или администратор.",
+                "error",
+            )
+        else:
+            add_flash(request, "Текущий пароль указан неверно.", "error")
         return RedirectResponse("/dashboard#profile-settings", status_code=302)
 
     if new_password != new_password_confirm:
@@ -1319,17 +1494,146 @@ def dashboard_update_password(
         add_flash(request, "Новый пароль должен отличаться от текущего.", "error")
         return RedirectResponse("/dashboard#profile-settings", status_code=302)
 
-    salt = new_salt()
-    password_hash = hash_password(new_password, salt)
     conn = connect()
     cur = conn.cursor()
-    cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (password_hash, salt, user["id"]))
+    new_session_version = set_user_password(cur, int(user["id"]), new_password, force_change=False)
     conn.commit()
     conn.close()
+    request.session["session_version"] = new_session_version
 
     audit_log(request, "self_update_password", target_user_id=user["id"], details="password changed in dashboard")
     add_flash(request, "Пароль успешно обновлен.", "success")
     return RedirectResponse("/dashboard#profile-settings", status_code=302)
+
+
+def _password_reset_flash_message(target: dict[str, Any], temporary_password: str) -> str:
+    display_name = (target.get("full_name") or "").strip() or (target.get("email") or "пользователь")
+    login = target.get("email") or "-"
+    return (
+        f"Пароль для «{display_name}» сброшен. "
+        f"Логин: {login}. Временный пароль: {temporary_password}. "
+        "Передайте его пользователю: при следующем входе пароль нужно будет сменить."
+    )
+
+
+def _admin_reset_user_password_impl(
+    request: Request,
+    user_id: int,
+    *,
+    next_path: str,
+    login_redirect: str,
+) -> RedirectResponse:
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse(login_redirect, status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT id, role, full_name, email FROM users WHERE id = ?", (user_id,))
+    target_row = cur.fetchone()
+    if not target_row:
+        conn.close()
+        add_flash(request, "Пользователь не найден.", "error")
+        return RedirectResponse(next_path, status_code=302)
+
+    target = dict(target_row)
+    if int(target["id"]) == int(user["id"]):
+        conn.close()
+        add_flash(request, "Собственный пароль нужно менять через личный кабинет, а не через сброс.", "info")
+        return RedirectResponse(next_path, status_code=302)
+
+    temporary_password = generate_temporary_password()
+    set_user_password(cur, int(target["id"]), temporary_password, force_change=True)
+    conn.commit()
+    conn.close()
+
+    audit_log(
+        request,
+        "admin_reset_user_password",
+        target_user_id=int(target["id"]),
+        details=f"temporary password issued for {target.get('email')}",
+    )
+    add_flash(request, _password_reset_flash_message(target, temporary_password), "success")
+    return RedirectResponse(next_path, status_code=302)
+
+
+def _teacher_reset_student_password_impl(
+    request: Request,
+    user_id: int,
+    *,
+    next_path: str,
+) -> RedirectResponse:
+    ensure_start_session_cookie(request)
+    teacher = get_current_user(request)
+    if not teacher or teacher["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, full_name, email, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
+        (user_id,),
+    )
+    target_row = cur.fetchone()
+    if not target_row:
+        conn.close()
+        add_flash(request, "Студент не найден.", "error")
+        return RedirectResponse(next_path, status_code=302)
+
+    target = dict(target_row)
+    if int(target.get("assigned_teacher_id") or 0) != int(teacher["id"]):
+        conn.close()
+        add_flash(request, "Нет доступа к сбросу пароля этого студента.", "error")
+        return RedirectResponse(next_path, status_code=302)
+
+    temporary_password = generate_temporary_password()
+    set_user_password(cur, int(target["id"]), temporary_password, force_change=True)
+    conn.commit()
+    conn.close()
+
+    audit_log(
+        request,
+        "teacher_reset_student_password",
+        target_user_id=int(target["id"]),
+        details=f"temporary password issued for {target.get('email')}",
+    )
+    add_flash(request, _password_reset_flash_message(target, temporary_password), "success")
+    return RedirectResponse(next_path, status_code=302)
+
+
+@app.post("/v1/admin/users/{user_id}/reset_password")
+def v1_admin_reset_user_password(request: Request, user_id: int, next: str = Form("")):
+    next_path = _safe_next_path(next, default="/v1/admin/students")
+    return _admin_reset_user_password_impl(
+        request,
+        user_id,
+        next_path=next_path,
+        login_redirect="/v1/admin",
+    )
+
+
+@app.post("/admin/users/{user_id}/reset_password")
+def admin_reset_user_password(request: Request, user_id: int, next: str = Form("")):
+    next_path = _safe_next_path(next, default="/admin/students")
+    return _admin_reset_user_password_impl(
+        request,
+        user_id,
+        next_path=next_path,
+        login_redirect="/login",
+    )
+
+
+@app.post("/v1/teacher/users/{user_id}/reset_password")
+def v1_teacher_reset_student_password(request: Request, user_id: int, next: str = Form("")):
+    next_path = _safe_next_path(next, default="/v1/teacher/users")
+    return _teacher_reset_student_password_impl(request, user_id, next_path=next_path)
+
+
+@app.post("/v2/teacher/students/{user_id}/reset_password")
+def v2_teacher_reset_student_password(request: Request, user_id: int, next: str = Form("")):
+    next_path = _safe_next_path(next, default="/v2/teacher/students")
+    return _teacher_reset_student_password_impl(request, user_id, next_path=next_path)
 
 
 @app.get("/teacher/lectures", response_class=HTMLResponse)
@@ -3258,7 +3562,20 @@ def v2_admin_login(
         cur.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (h, s, row["id"]))
         conn.commit()
         conn.close()
-    establish_user_session(request, user_id=row["id"], email=row["email"], role="admin")
+    establish_user_session(
+        request,
+        user_id=row["id"],
+        email=row["email"],
+        role="admin",
+        session_version=_coerce_session_version(row["session_version"]),
+    )
+    if user_must_change_password(row):
+        add_flash_once(
+            request,
+            "Пароль был сброшен. Используйте временный пароль, выданный преподавателем или администратором, и сразу задайте новый пароль в личном кабинете.",
+            "error",
+        )
+        return RedirectResponse("/dashboard#profile-settings", status_code=302)
     return RedirectResponse("/admin/students", status_code=302)
 
 

@@ -1777,6 +1777,7 @@ def _generate_fallback(text: str, count: int, difficulty: str, discipline_name: 
     prepared = _prepare_source_text(text, max_chars=12000)
     sentences = _extract_content_sentences(prepared)
     terms = _extract_terms(prepared, limit=40)
+    focus_units = _extract_fallback_focus_units(text, limit=max(count * 2, 10))
 
     # ── Шаг 0: Извлечь определения из ОРИГИНАЛЬНОГО текста (до prepare) ───
     #    _prepare_source_text склеивает строки и портит формат "Термин - описание"
@@ -1800,7 +1801,7 @@ def _generate_fallback(text: str, count: int, difficulty: str, discipline_name: 
         sentences = merged
 
     if len(sentences) < 2 or len(terms) < 3:
-        if len(definitions) < 3:
+        if len(definitions) < 3 and not focus_units:
             return []
 
     # Построить индекс термин → предложения (case-insensitive)
@@ -1864,7 +1865,118 @@ def _generate_fallback(text: str, count: int, difficulty: str, discipline_name: 
                 used_texts.add(q["text"])
                 questions.append(q)
 
+    # ── Шаг 4: последний безопасный резерв — темы, реально упомянутые в лекции ─
+    if len(questions) < count and focus_units:
+        for attempt in range(count * 4):
+            if len(questions) >= count:
+                break
+            q = _fb_mentioned_unit(focus_units, attempt, discipline_name=discipline_name)
+            if q and q["text"] not in used_texts:
+                used_texts.add(q["text"])
+                questions.append(q)
+
     return questions
+
+
+_FALLBACK_DISTRACTOR_UNITS = [
+    "реляционная схема",
+    "нормализация данных",
+    "транзакционная изоляция",
+    "хеш-таблица",
+    "дерево решений",
+    "маршрутизация пакетов",
+    "контроль доступа",
+    "виртуальная память",
+    "контейнеризация сервисов",
+    "объектно-ориентированное проектирование",
+    "система контроля версий",
+    "асимметричное шифрование",
+]
+
+
+def _extract_fallback_focus_units(text: str, limit: int = 12) -> list[str]:
+    source = (text or "").strip()
+    source_low = " ".join(source.lower().split())
+    candidates = _extract_focus_units(source, limit=max(limit * 2, 12))
+
+    units: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        candidate = " ".join((raw or "").strip().split())
+        normalized = candidate.lower()
+        if len(candidate) < 5:
+            continue
+        if _has_source_artifacts(candidate):
+            continue
+        if normalized not in source_low:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        units.append(candidate)
+        if len(units) >= limit:
+            return units
+
+    for raw in _extract_terms(source, limit=max(limit * 3, 12)):
+        candidate = " ".join((raw or "").strip().split())
+        normalized = candidate.lower()
+        if len(candidate) < 5:
+            continue
+        if _has_source_artifacts(candidate):
+            continue
+        if normalized not in source_low:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        units.append(candidate)
+        if len(units) >= limit:
+            break
+
+    return units
+
+
+def _fb_mentioned_unit(
+    focus_units: list[str],
+    idx: int,
+    discipline_name: str | None = None,
+) -> dict | None:
+    if not focus_units:
+        return None
+
+    target = focus_units[idx % len(focus_units)]
+    correct_opt = target if target[0].isupper() else target.capitalize()
+    seen = {correct_opt.lower()}
+    distractors: list[str] = []
+    for item in _FALLBACK_DISTRACTOR_UNITS:
+        normalized = item.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        distractors.append(item if item[0].isupper() else item.capitalize())
+        if len(distractors) >= 3:
+            break
+    if len(distractors) < 3:
+        return None
+
+    stems = [
+        "Какая тема прямо упоминается в лекции?",
+        "Какой термин относится к содержанию лекции?",
+        "Какое понятие встречается в учебном материале?",
+        "Какой из вариантов действительно присутствует в лекции?",
+        "Какой термин рассматривается в данном материале?",
+    ]
+    if discipline_name:
+        stems[1] = f"Какой термин относится к дисциплине «{discipline_name}» и встречается в лекции?"
+
+    options = [correct_opt] + distractors[:3]
+    random.shuffle(options)
+    correct_index = options.index(correct_opt)
+    return {
+        "text": stems[idx % len(stems)],
+        "options": options,
+        "correct_index": correct_index,
+    }
 
 
 def _fb_cloze(sentence: str, terms: list[str], idx: int) -> dict | None:

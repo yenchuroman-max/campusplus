@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -86,6 +87,12 @@ def _register(c, role="student", email="test@test.ru", login=None, password="pas
 def _login(c, email="test@test.ru", login=None, password="pass123"):
     login_value = (login or email or "").strip()
     return c.post("/login", data={"login": login_value, "password": password}, follow_redirects=False)
+
+
+def _extract_temporary_password(text: str) -> str:
+    match = re.search(r"Временный пароль:\s*([A-Za-z0-9!_-]+)", text)
+    assert match is not None, text
+    return match.group(1)
 
 
 def _create_teacher(c, db, email="teacher@test.ru", name="Иванов И.И.", password="pass123"):
@@ -206,6 +213,8 @@ class TestDatabase:
         assert "assigned_teacher_id" in cols
         assert "student_group" in cols
         assert "discipline_id" in cols
+        assert "must_change_password" in cols
+        assert "session_version" in cols
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -228,7 +237,7 @@ class TestAuth:
         _create_group(db, "БИ-41")
         r = _register(client, role="student", email="s1@t.ru", group="БИ-41")
         assert r.status_code == 302
-        assert "/login" in r.headers.get("location", "")
+        assert "/dashboard" in r.headers.get("location", "")
 
     def test_register_teacher_blocked(self, client):
         r = _register(client, role="teacher", email="t1@t.ru")
@@ -270,6 +279,27 @@ class TestAuth:
         r = _login(client, email="s3@t.ru")
         assert r.status_code == 302
         assert "/dashboard" in r.headers.get("location", "")
+
+    def test_login_with_temporary_password_redirects_to_forced_change(self, client, db):
+        user_id = _insert_user(
+            db,
+            role="student",
+            login="reset_student@test.ru",
+            password="temp123!",
+            full_name="Reset Student",
+            group="БИ-41",
+        )
+        cur = db.cursor()
+        cur.execute("UPDATE users SET must_change_password = 1 WHERE id = ?", (user_id,))
+        db.commit()
+
+        r = _login(client, email="reset_student@test.ru", password="temp123!")
+        assert r.status_code == 302
+        assert "/dashboard#profile-settings" == r.headers.get("location", "")
+
+        blocked = client.get("/student/tests", follow_redirects=False)
+        assert blocked.status_code == 302
+        assert "/dashboard#profile-settings" == blocked.headers.get("location", "")
 
     def test_logout(self, client, db):
         _insert_user(db, role="teacher", login="t4@t.ru", password="pass123", full_name="Teacher Logout")
@@ -320,6 +350,80 @@ class TestAuth:
             assert "Student Two" not in dash_one.text
             assert "Student Two" in dash_two.text
             assert "Student One" not in dash_two.text
+
+    def test_password_reset_invalidates_existing_student_session(self, isolated_db, db):
+        from fastapi.testclient import TestClient
+        import main as main_module
+        from app.db import init_db
+
+        init_db()
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="session_reset_student@test.ru",
+            password="pass123",
+            full_name="Session Reset Student",
+            group="БИ-41",
+        )
+        _create_admin(db)
+
+        with TestClient(main_module.app, raise_server_exceptions=False) as student_client, TestClient(main_module.app, raise_server_exceptions=False) as admin_client:
+            assert _login(student_client, email="session_reset_student@test.ru", password="pass123").status_code == 302
+            assert _login_admin(admin_client).status_code == 302
+
+            reset_response = admin_client.post(
+                f"/admin/users/{student_id}/reset_password",
+                data={"next": "/admin/students"},
+                follow_redirects=True,
+            )
+            assert reset_response.status_code == 200
+            assert "Временный пароль:" in reset_response.text
+
+            stale_dashboard = student_client.get("/dashboard", follow_redirects=False)
+            assert stale_dashboard.status_code == 302
+            assert stale_dashboard.headers.get("location", "") == "/login"
+
+    def test_self_password_change_invalidates_parallel_session(self, isolated_db, db):
+        from fastapi.testclient import TestClient
+        import main as main_module
+        from app.db import init_db
+
+        init_db()
+        _insert_user(
+            db,
+            role="teacher",
+            login="parallel_teacher@test.ru",
+            password="pass123",
+            full_name="Parallel Teacher",
+        )
+
+        with TestClient(main_module.app, raise_server_exceptions=False) as primary_client, TestClient(main_module.app, raise_server_exceptions=False) as stale_client:
+            assert _login(primary_client, email="parallel_teacher@test.ru", password="pass123").status_code == 302
+            assert _login(stale_client, email="parallel_teacher@test.ru", password="pass123").status_code == 302
+
+            change_response = primary_client.post(
+                "/dashboard/profile/password",
+                data={
+                    "current_password": "pass123",
+                    "new_password": "newpass123",
+                    "new_password_confirm": "newpass123",
+                },
+                follow_redirects=False,
+            )
+            assert change_response.status_code == 302
+            assert "/dashboard#profile-settings" in change_response.headers.get("location", "")
+
+            fresh_dashboard = primary_client.get("/dashboard")
+            assert fresh_dashboard.status_code == 200
+            assert "Parallel Teacher" in fresh_dashboard.text
+
+            stale_dashboard = stale_client.get("/dashboard", follow_redirects=False)
+            assert stale_dashboard.status_code == 302
+            assert stale_dashboard.headers.get("location", "") == "/login"
+
+            relogin = _login(stale_client, email="parallel_teacher@test.ru", password="newpass123")
+            assert relogin.status_code == 302
+            assert "/v2/teacher" in relogin.headers.get("location", "")
 
     def test_dynamic_pages_disable_cache_and_use_project_cookie(self, client, db):
         login_page = client.get("/login")
@@ -398,6 +502,36 @@ class TestAuth:
         ok_new = _login(client, email="pwd_teacher@test.ru", password="newpass123")
         assert ok_new.status_code == 302
 
+    def test_dashboard_profile_password_update_clears_forced_change_flag(self, client, db):
+        user_id = _insert_user(
+            db,
+            role="teacher",
+            login="forced_change@test.ru",
+            password="temp123!",
+            full_name="Forced Change",
+        )
+        cur = db.cursor()
+        cur.execute("UPDATE users SET must_change_password = 1 WHERE id = ?", (user_id,))
+        db.commit()
+
+        assert _login(client, email="forced_change@test.ru", password="temp123!").status_code == 302
+
+        r = client.post(
+            "/dashboard/profile/password",
+            data={
+                "current_password": "temp123!",
+                "new_password": "newpass123",
+                "new_password_confirm": "newpass123",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+
+        cur.execute("SELECT must_change_password FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        assert row is not None
+        assert int(row["must_change_password"]) == 0
+
 
 # ═══════════════════════════════════════════════════════════════
 # 3. СТРАНИЦЫ (GET — без авторизации)
@@ -407,7 +541,7 @@ class TestPublicPages:
     def test_index(self, client):
         r = client.get("/")
         assert r.status_code == 200
-        assert "CampusPulse" in r.text
+        assert "КампусПлюс" in r.text
 
     def test_login_page(self, client):
         r = client.get("/login")
@@ -531,6 +665,54 @@ class TestTeacherFlow:
         r = client.get(f"/teacher/tests/{test_id}/qr")
         assert r.status_code == 200
         assert "qr" in r.text.lower() or "QR" in r.text
+
+    def test_teacher_can_reset_assigned_student_password(self, client, db):
+        teacher_id = self._setup_teacher(client, db)
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="reset_me@student.ru",
+            password="oldpass123",
+            full_name="Reset Me",
+            group="БИ-41",
+            assigned_teacher_id=teacher_id,
+        )
+
+        response = client.post(
+            f"/v2/teacher/students/{student_id}/reset_password",
+            data={"next": "/v2/teacher/students"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        temp_password = _extract_temporary_password(response.text)
+
+        client.post("/logout", follow_redirects=False)
+        old_login = _login(client, email="reset_me@student.ru", password="oldpass123")
+        assert old_login.status_code == 200
+
+        new_login = _login(client, email="reset_me@student.ru", password=temp_password)
+        assert new_login.status_code == 302
+        assert "/dashboard#profile-settings" == new_login.headers.get("location", "")
+
+    def test_teacher_cannot_reset_foreign_student_password(self, client, db):
+        self._setup_teacher(client, db)
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="foreign@student.ru",
+            password="oldpass123",
+            full_name="Foreign Student",
+            group="БИ-41",
+            assigned_teacher_id=None,
+        )
+
+        response = client.post(
+            f"/v2/teacher/students/{student_id}/reset_password",
+            data={"next": "/v2/teacher/students"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert "Нет доступа" in response.text
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -802,6 +984,32 @@ class TestAdminFlow:
         assert r.status_code == 302
         cur.execute("SELECT id FROM users WHERE id = ?", (uid,))
         assert cur.fetchone() is None
+
+    def test_admin_can_reset_teacher_password(self, client, db):
+        self._setup_admin(client, db)
+        teacher_id = _insert_user(
+            db,
+            role="teacher",
+            login="reset_teacher@test.ru",
+            password="oldpass123",
+            full_name="Reset Teacher",
+        )
+
+        response = client.post(
+            f"/admin/users/{teacher_id}/reset_password",
+            data={"next": "/admin/teachers"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        temp_password = _extract_temporary_password(response.text)
+
+        client.post("/logout", follow_redirects=False)
+        old_login = _login(client, email="reset_teacher@test.ru", password="oldpass123")
+        assert old_login.status_code == 200
+
+        new_login = _login(client, email="reset_teacher@test.ru", password=temp_password)
+        assert new_login.status_code == 302
+        assert "/dashboard#profile-settings" == new_login.headers.get("location", "")
 
     def test_admin_cannot_delete_teacher(self, client, db):
         self._setup_admin(client, db)

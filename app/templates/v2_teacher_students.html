@@ -44,6 +44,10 @@
                 <div class="card-footer actions-inline student-card-actions">
                   <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/edit">Редактировать</a>
                   <a class="button secondary" href="/v2/teacher/students/{{ s.id }}/performance">Успеваемость</a>
+                  <form method="post" action="/v2/teacher/students/{{ s.id }}/reset_password" onsubmit="return confirm('Сбросить пароль студента и выдать временный пароль?');" style="margin:0;">
+                    <input type="hidden" name="next" value="/v2/teacher/students" />
+                    <button class="button secondary" type="submit">Сбросить пароль</button>
+                  </form>
                   <form method="post" action="/v2/teacher/students/{{ s.id }}/delete" onsubmit="return confirm('Удалить студента? Это действие необратимо.');" style="margin:0;">
                     <button class="button danger" type="submit">Удалить</button>
                   </form>

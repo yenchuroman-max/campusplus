@@ -6,6 +6,11 @@
 <div class="card profile-settings-card" id="profile-settings" style="margin-top:14px;">
   <h3>Настройки профиля</h3>
   <p class="muted">Изменение ФИО и пароля для текущей учетной записи.</p>
+  {% if password_reset_required %}
+  <div class="alert profile-reset-note">
+    Пароль был сброшен. Для продолжения работы введите временный пароль, который вам выдал преподаватель или администратор, и задайте новый пароль.
+  </div>
+  {% endif %}
 
   <form method="post" action="/dashboard/profile/name" class="inline-group-form profile-name-form" style="margin-top:10px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -15,7 +20,7 @@
 
   <form method="post" action="/dashboard/profile/password" class="inline-group-form profile-password-form" style="margin-top:10px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-    <input type="password" name="current_password" placeholder="Текущий пароль" required />
+    <input type="password" name="current_password" placeholder="{% if password_reset_required %}Временный пароль{% else %}Текущий пароль{% endif %}" required />
     <input type="password" name="new_password" placeholder="Новый пароль" required />
     <input type="password" name="new_password_confirm" placeholder="Повторите новый пароль" required />
     <button class="button secondary" type="submit">Обновить пароль</button>

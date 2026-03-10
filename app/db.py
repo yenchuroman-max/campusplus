@@ -274,7 +274,9 @@ def _init_db_sqlite() -> None:
             full_name TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL
+            salt TEXT NOT NULL,
+            must_change_password INTEGER NOT NULL DEFAULT 0,
+            session_version INTEGER NOT NULL DEFAULT 1
         )
         """
     )
@@ -288,6 +290,10 @@ def _init_db_sqlite() -> None:
         cur.execute("ALTER TABLE users ADD COLUMN student_group TEXT")
     if "discipline_id" not in existing:
         cur.execute("ALTER TABLE users ADD COLUMN discipline_id INTEGER")
+    if "must_change_password" not in existing:
+        cur.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+    if "session_version" not in existing:
+        cur.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1")
 
     cur.execute(
         """
@@ -422,6 +428,8 @@ def _init_db_postgres() -> None:
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             salt TEXT NOT NULL,
+            must_change_password INTEGER NOT NULL DEFAULT 0,
+            session_version INTEGER NOT NULL DEFAULT 1,
             last_login TEXT,
             assigned_teacher_id BIGINT,
             student_group TEXT,
@@ -523,6 +531,8 @@ def _init_db_postgres() -> None:
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_teacher_id BIGINT")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS student_group TEXT")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS discipline_id BIGINT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1")
     cur.execute("ALTER TABLE lectures ADD COLUMN IF NOT EXISTS discipline_id BIGINT")
     cur.execute("ALTER TABLE lectures ADD COLUMN IF NOT EXISTS original_filename TEXT")
 
