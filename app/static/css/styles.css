@@ -1897,6 +1897,26 @@ input[type="file"]::file-selector-button {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.group-teachers-list {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.group-teacher-card {
+  padding: var(--sp-3);
+}
+
+.group-teacher-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.group-teacher-disciplines {
+  margin-top: var(--sp-3);
+}
+
 /* ── Flashes / Alerts ──────────────────────────────────────── */
 .flash {
   padding: var(--sp-3) var(--sp-4);
@@ -2777,6 +2797,10 @@ html[data-theme="light"] ::selection {
   .actions form .button { width: 100%; }
   .student-card-actions {
     grid-template-columns: 1fr;
+  }
+  .group-teacher-main {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .brand {

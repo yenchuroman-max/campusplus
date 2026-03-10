@@ -76,16 +76,34 @@
     <div class="card" style="margin-bottom:10px;">
       <div class="card-title">Преподаватели группы</div>
       {% if selected_group.teachers %}
-        <div class="actions-inline" style="margin-top:10px;">
+        <div class="group-teachers-list" style="margin-top:10px;">
           {% for teacher in selected_group.teachers %}
-          <form method="post" action="{{ base_prefix }}/groups/{{ selected_group.name.replace(' ', '_') }}/teachers/{{ teacher.id }}/delete" style="margin:0;">
-            <button class="button secondary" type="submit">
-              {{ teacher.full_name }} · логин: {{ teacher.email }}
-            </button>
-          </form>
+          <div class="card group-teacher-card">
+            <div class="group-teacher-main">
+              <div>
+                <div class="card-title" style="margin-bottom:4px;">{{ teacher.full_name }}</div>
+                <div class="card-desc">Логин: {{ teacher.email }}</div>
+              </div>
+              <form method="post" action="{{ base_prefix }}/groups/{{ selected_group.name.replace(' ', '_') }}/teachers/{{ teacher.id }}/delete" style="margin:0;">
+                <button class="button secondary" type="submit">Убрать из группы</button>
+              </form>
+            </div>
+            <div class="group-teacher-disciplines">
+              <span class="muted">Дисциплины этой группы:</span>
+              {% if teacher.disciplines %}
+                <div class="teachers-list" style="margin-top:8px;">
+                  {% for discipline in teacher.disciplines %}
+                    <span class="teacher-chip">{{ discipline.name }}</span>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="muted" style="margin-top:6px;">Пока не ведёт дисциплины у этой группы.</div>
+              {% endif %}
+            </div>
+          </div>
           {% endfor %}
         </div>
-        <p class="muted" style="margin-top:8px;">Нажатие на преподавателя убирает его из группы.</p>
+        <p class="muted" style="margin-top:8px;">Сначала назначьте преподавателю дисциплину для группы, после этого она появится в списке ниже.</p>
       {% else %}
         <div class="muted">Преподаватели ещё не назначены.</div>
       {% endif %}

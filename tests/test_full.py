@@ -961,6 +961,30 @@ class TestAdminFlow:
         assert "Teacher One" in page.text
         assert "Teacher Two" in page.text
 
+    def test_admin_group_page_shows_teacher_disciplines_for_group(self, client, db):
+        self._setup_admin(client, db)
+        teacher_one = _insert_user(db, role="teacher", login="g5@test.ru", password="pass123", full_name="Teacher Five")
+        teacher_two = _insert_user(db, role="teacher", login="g6@test.ru", password="pass123", full_name="Teacher Six")
+        _create_group(db, "БИ-41.3", teacher_one)
+        cur = db.cursor()
+        cur.execute("INSERT OR IGNORE INTO group_teachers (group_name, teacher_id) VALUES (?, ?)", ("БИ-41.3", teacher_two))
+        cur.execute("SELECT id, name FROM disciplines ORDER BY id LIMIT 2")
+        discipline_rows = cur.fetchall()
+        first_discipline_id = int(discipline_rows[0][0])
+        first_discipline_name = discipline_rows[0][1]
+        second_discipline_id = int(discipline_rows[1][0])
+        second_discipline_name = discipline_rows[1][1]
+        _link_teacher_discipline_group(db, teacher_one, "БИ-41.3", first_discipline_id)
+        _link_teacher_discipline_group(db, teacher_two, "БИ-41.3", second_discipline_id)
+
+        page = client.get("/admin/groups/БИ-41.3")
+        assert page.status_code == 200
+        assert "Teacher Five" in page.text
+        assert "Teacher Six" in page.text
+        assert first_discipline_name in page.text
+        assert second_discipline_name in page.text
+        assert "Дисциплины этой группы" in page.text
+
     def test_admin_can_remove_teacher_from_group(self, client, db):
         self._setup_admin(client, db)
         teacher_one = _insert_user(db, role="teacher", login="g3@test.ru", password="pass123", full_name="Teacher Three")

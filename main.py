@@ -130,15 +130,42 @@ def get_group_teachers(cur, group_name: str) -> list[dict[str, Any]]:
         return []
     cur.execute(
         """
-        SELECT u.id, u.full_name, u.email
+        SELECT u.id, u.full_name, u.email, d.id AS discipline_id, d.name AS discipline_name
         FROM group_teachers gt
         JOIN users u ON u.id = gt.teacher_id
+        LEFT JOIN teaching_assignments ta
+          ON ta.group_name = gt.group_name
+         AND ta.teacher_id = gt.teacher_id
+        LEFT JOIN disciplines d ON d.id = ta.discipline_id
         WHERE gt.group_name = ? AND u.role = 'teacher'
-        ORDER BY u.full_name
+        ORDER BY u.full_name, d.name
         """,
         (normalized,),
     )
-    return [dict(row) for row in cur.fetchall()]
+    teachers: list[dict[str, Any]] = []
+    teacher_index: dict[int, dict[str, Any]] = {}
+    for row in cur.fetchall():
+        teacher_id = int(row["id"])
+        teacher = teacher_index.get(teacher_id)
+        if teacher is None:
+            teacher = {
+                "id": teacher_id,
+                "full_name": row["full_name"],
+                "email": row["email"],
+                "disciplines": [],
+            }
+            teacher_index[teacher_id] = teacher
+            teachers.append(teacher)
+        if row["discipline_id"] and row["discipline_name"]:
+            teacher["disciplines"].append(
+                {
+                    "id": int(row["discipline_id"]),
+                    "name": row["discipline_name"],
+                }
+            )
+    for teacher in teachers:
+        teacher["discipline_names"] = ", ".join(item["name"] for item in teacher["disciplines"])
+    return teachers
 
 
 def refresh_group_primary_teacher(cur, group_name: str) -> int | None:
