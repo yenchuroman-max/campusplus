@@ -1118,6 +1118,18 @@ class TestV2Teacher:
         r = client.get("/v2/teacher/disciplines")
         assert r.status_code == 200
 
+    def test_disciplines_page_shows_group_access_controls(self, client, db):
+        teacher_id = self._setup(client, db)
+        discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-42.1")
+        db.cursor().execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", ("BI-42.2",))
+        db.commit()
+
+        r = client.get("/v2/teacher/disciplines")
+        assert r.status_code == 200
+        assert "BI-42.1" in r.text
+        assert "Открыть доступ группе" in r.text
+        assert f'name="discipline_id" value="{discipline_id}"' in r.text
+
     def test_tests_page(self, client, db):
         self._setup(client, db)
         r = client.get("/v2/teacher/tests")

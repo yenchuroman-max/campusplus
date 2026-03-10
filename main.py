@@ -4727,10 +4727,28 @@ def v2_teacher_disciplines(request: Request):
     )
     disciplines = [dict(row) for row in cur.fetchall()]
     assigned_ids = {int(item["id"]) for item in disciplines}
+    all_group_names = get_all_group_names(cur)
 
     cur.execute("SELECT id, name FROM disciplines ORDER BY name")
     all_disciplines = [dict(row) for row in cur.fetchall()]
     available_disciplines = [d for d in all_disciplines if int(d["id"]) not in assigned_ids]
+
+    cur.execute(
+        """
+        SELECT ta.discipline_id, ta.group_name
+        FROM teaching_assignments ta
+        WHERE ta.teacher_id = ?
+        ORDER BY ta.group_name
+        """,
+        (user["id"],),
+    )
+    assigned_groups_by_discipline: dict[int, list[str]] = {}
+    for row in cur.fetchall():
+        discipline_id = int(row["discipline_id"])
+        group_name = normalize_group_name(row["group_name"])
+        if not group_name:
+            continue
+        assigned_groups_by_discipline.setdefault(discipline_id, []).append(group_name)
 
     for discipline in disciplines:
         cur.execute(
@@ -4778,6 +4796,14 @@ def v2_teacher_disciplines(request: Request):
         discipline["test_count"] = test_count
         discipline["student_count"] = student_count
         discipline["group_count"] = group_count
+        assigned_groups = sorted(
+            {group for group in assigned_groups_by_discipline.get(int(discipline["id"]), []) if group},
+            key=natural_group_sort_key,
+        )
+        discipline["assigned_groups"] = assigned_groups
+        discipline["available_groups"] = [
+            group_name for group_name in all_group_names if group_name not in set(assigned_groups)
+        ]
 
     conn.close()
     return render(

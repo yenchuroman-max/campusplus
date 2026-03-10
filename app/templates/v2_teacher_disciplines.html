@@ -24,7 +24,39 @@
           <div class="muted">Тестов: {{ d.test_count }}</div>
           <div class="muted">Групп в работе: {{ d.group_count }}</div>
           <div class="muted">Закреплено студентов: {{ d.student_count }}</div>
-          <div class="actions-inline" style="margin-top:8px;">
+
+          <div style="margin-top:10px;">
+            <div class="muted" style="margin-bottom:6px;">Доступ открыт для групп:</div>
+            {% if d.assigned_groups %}
+              <div class="actions-inline">
+                {% for group_name in d.assigned_groups %}
+                  <form method="post" action="/v2/teacher/groups/unassign" style="margin:0;">
+                    <input type="hidden" name="group_name" value="{{ group_name }}">
+                    <input type="hidden" name="discipline_id" value="{{ d.id }}">
+                    <button class="button secondary" type="submit">{{ group_name }}</button>
+                  </form>
+                {% endfor %}
+              </div>
+              <p class="muted" style="margin-top:6px;">Нажатие на группу убирает ей доступ к дисциплине.</p>
+            {% else %}
+              <p class="muted">Пока ни одна группа не привязана к дисциплине.</p>
+            {% endif %}
+          </div>
+
+          {% if d.available_groups %}
+          <form method="post" action="/v2/teacher/groups/assign" class="inline-group-form" style="margin-top:10px;">
+            <input type="hidden" name="discipline_id" value="{{ d.id }}">
+            <select name="group_name" required>
+              <option value="">Выберите группу для доступа</option>
+              {% for group_name in d.available_groups %}
+                <option value="{{ group_name }}">{{ group_name }}</option>
+              {% endfor %}
+            </select>
+            <button class="button secondary" type="submit">Открыть доступ группе</button>
+          </form>
+          {% endif %}
+
+          <div class="actions-inline" style="margin-top:10px;">
             <a class="button secondary" href="/v2/teacher/tests?discipline_id={{ d.id }}">Лекции и тесты</a>
             <a class="button secondary" href="/v2/teacher/groups">Группы</a>
             <a class="button secondary" href="/v2/teacher/analytics?discipline_id={{ d.id }}">Аналитика</a>
@@ -36,7 +68,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <p class="muted" style="margin-top:8px;">Дисциплины не назначены. После добавления дисциплины перейдите во вкладку «Группы», чтобы привязать аудиторию.</p>
+    <p class="muted" style="margin-top:8px;">Дисциплины не назначены. После добавления дисциплины можно сразу указать группы, которым нужно открыть доступ.</p>
   {% endif %}
 </div>
 {% endblock %}
