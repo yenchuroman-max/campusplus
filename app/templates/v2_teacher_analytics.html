@@ -5,6 +5,7 @@
   <div class="card-title">Дисциплина</div>
   <form method="get" action="/v2/teacher/analytics" class="inline-group-form" style="margin-top:8px;">
     <select name="discipline_id">
+      <option value="" {% if not selected_discipline_id %}selected{% endif %}>Все дисциплины</option>
       {% for d in disciplines %}
         <option value="{{ d.id }}" {% if selected_discipline_id == d.id %}selected{% endif %}>{{ d.name }}</option>
       {% endfor %}

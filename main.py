@@ -5843,9 +5843,6 @@ def v2_teacher_analytics(request: Request):
     )
     disciplines = [dict(row) for row in cur.fetchall()]
 
-    if not discipline_filter and disciplines:
-        discipline_filter = int(disciplines[0]["id"])
-
     if discipline_filter:
         cur.execute(
             """

@@ -1751,6 +1751,10 @@ input[type="file"]::file-selector-button {
 }
 
 .student-card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--sp-2);
   margin-top: auto;
   padding-top: var(--sp-2);
 }
@@ -1758,7 +1762,6 @@ input[type="file"]::file-selector-button {
 .student-card-actions > .button,
 .student-card-actions > a.button,
 .student-card-actions > form {
-  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -2772,6 +2775,9 @@ html[data-theme="light"] ::selection {
   .actions form { width: 100%; }
   .actions-inline form .button,
   .actions form .button { width: 100%; }
+  .student-card-actions {
+    grid-template-columns: 1fr;
+  }
 
   .brand {
     max-width: calc(100% - 56px);

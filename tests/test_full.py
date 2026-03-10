@@ -1354,6 +1354,39 @@ class TestV2Teacher:
         db.commit()
         r = client.get("/v2/teacher/analytics")
         assert r.status_code == 200
+        assert "Analytics Student" in r.text
+        assert "72.0" in r.text
+
+    def test_analytics_page_defaults_to_all_disciplines(self, client, db):
+        teacher_id = self._setup(client, db)
+        first_discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-70")
+        cur = db.cursor()
+        cur.execute("SELECT id FROM disciplines WHERE id != ? ORDER BY id LIMIT 1", (first_discipline_id,))
+        second_discipline_id = int(cur.fetchone()[0])
+        _link_teacher_discipline_group(db, teacher_id, "BI-71", second_discipline_id)
+
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="analytics_second@t.ru",
+            password="pass123",
+            full_name="Analytics Second Student",
+            group="BI-71",
+            assigned_teacher_id=None,
+        )
+        lecture_id = _insert_lecture(db, teacher_id, title="Second Discipline Lecture", discipline_id=second_discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="Second Discipline Test")
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, student_id, 95.0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+
+        r = client.get("/v2/teacher/analytics")
+        assert r.status_code == 200
+        assert "Все дисциплины" in r.text
+        assert "Analytics Second Student" in r.text
+        assert "95.0" in r.text
 
     def test_analytics_backfills_students_from_existing_attempts(self, client, db):
         teacher_id = self._setup(client, db)
