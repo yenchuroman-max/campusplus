@@ -256,11 +256,69 @@ def _backfill_common(cur) -> None:
             (fallback_discipline_id,),
         )
 
-    # Backfill discipline/group/teacher access model from existing group ownership.
-    cur.execute("SELECT id, teacher_id, name FROM groups WHERE teacher_id IS NOT NULL")
+    # Backfill explicit group-teacher links from the legacy single-teacher column.
+    cur.execute("SELECT name, teacher_id FROM groups WHERE teacher_id IS NOT NULL")
     for row in cur.fetchall():
         teacher_id = int(row["teacher_id"])
         group_name = (row["name"] or "").strip()
+        if not group_name:
+            continue
+        if _use_postgres():
+            cur.execute(
+                """
+                INSERT INTO group_teachers (group_name, teacher_id)
+                VALUES (?, ?)
+                ON CONFLICT (group_name, teacher_id) DO NOTHING
+                """,
+                (group_name, teacher_id),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO group_teachers (group_name, teacher_id)
+                VALUES (?, ?)
+                """,
+                (group_name, teacher_id),
+            )
+
+    # Legacy users may still reference teachers directly through assigned_teacher_id.
+    cur.execute(
+        """
+        SELECT DISTINCT assigned_teacher_id AS teacher_id, COALESCE(student_group, '') AS group_name
+        FROM users
+        WHERE role = 'student' AND assigned_teacher_id IS NOT NULL
+        """
+    )
+    for row in cur.fetchall():
+        teacher_id = row["teacher_id"]
+        if not teacher_id:
+            continue
+        normalized_group = (row["group_name"] or "").strip()
+        if not normalized_group:
+            continue
+        if _use_postgres():
+            cur.execute(
+                """
+                INSERT INTO group_teachers (group_name, teacher_id)
+                VALUES (?, ?)
+                ON CONFLICT (group_name, teacher_id) DO NOTHING
+                """,
+                (normalized_group, int(teacher_id)),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO group_teachers (group_name, teacher_id)
+                VALUES (?, ?)
+                """,
+                (normalized_group, int(teacher_id)),
+            )
+
+    # Backfill discipline/group/teacher access model from group-teacher links.
+    cur.execute("SELECT group_name, teacher_id FROM group_teachers")
+    for row in cur.fetchall():
+        teacher_id = int(row["teacher_id"])
+        group_name = (row["group_name"] or "").strip()
         if not group_name:
             continue
         cur.execute(
@@ -285,43 +343,6 @@ def _backfill_common(cur) -> None:
                     VALUES (?, ?, ?)
                     """,
                     (teacher_id, discipline_id, group_name),
-                )
-
-    # Legacy users may still reference a teacher directly without a proper group catalog row.
-    cur.execute(
-        """
-        SELECT DISTINCT assigned_teacher_id AS teacher_id, COALESCE(student_group, '') AS group_name
-        FROM users
-        WHERE role = 'student' AND assigned_teacher_id IS NOT NULL
-        """
-    )
-    for row in cur.fetchall():
-        teacher_id = row["teacher_id"]
-        if not teacher_id:
-            continue
-        normalized_group = (row["group_name"] or "").strip()
-        cur.execute(
-            "SELECT discipline_id FROM teacher_disciplines WHERE teacher_id = ?",
-            (int(teacher_id),),
-        )
-        for discipline_row in cur.fetchall():
-            discipline_id = int(discipline_row["discipline_id"])
-            if _use_postgres():
-                cur.execute(
-                    """
-                    INSERT INTO teaching_assignments (teacher_id, discipline_id, group_name)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT (teacher_id, discipline_id, group_name) DO NOTHING
-                    """,
-                    (int(teacher_id), discipline_id, normalized_group),
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT OR IGNORE INTO teaching_assignments (teacher_id, discipline_id, group_name)
-                    VALUES (?, ?, ?)
-                    """,
-                    (int(teacher_id), discipline_id, normalized_group),
                 )
 
 
@@ -372,6 +393,16 @@ def _init_db_sqlite() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             teacher_id INTEGER,
+            FOREIGN KEY (teacher_id) REFERENCES users(id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS group_teachers (
+            group_name TEXT NOT NULL,
+            teacher_id INTEGER NOT NULL,
+            PRIMARY KEY (group_name, teacher_id),
             FOREIGN KEY (teacher_id) REFERENCES users(id)
         )
         """
@@ -526,6 +557,15 @@ def _init_db_postgres() -> None:
             id BIGSERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
             teacher_id BIGINT REFERENCES users(id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS group_teachers (
+            group_name TEXT NOT NULL,
+            teacher_id BIGINT NOT NULL REFERENCES users(id),
+            PRIMARY KEY (group_name, teacher_id)
         )
         """
     )

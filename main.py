@@ -92,31 +92,140 @@ def user_row_to_dict(row) -> dict:
 
 
 def fetch_managed_groups(cur) -> list[dict[str, Any]]:
+    cur.execute("SELECT name FROM groups ORDER BY name")
+    groups = [{"name": row["name"]} for row in cur.fetchall() if (row["name"] or "").strip()]
+    names = {g.get("name") for g in groups}
+    teacher_map: dict[str, list[dict[str, Any]]] = {}
     cur.execute(
         """
-        SELECT g.name, g.teacher_id, u.full_name AS teacher_name
-        FROM groups g
-        LEFT JOIN users u ON u.id = g.teacher_id
-        ORDER BY g.name
+        SELECT gt.group_name, u.id, u.full_name, u.email
+        FROM group_teachers gt
+        JOIN users u ON u.id = gt.teacher_id
+        WHERE u.role = 'teacher'
+        ORDER BY gt.group_name, u.full_name
         """
     )
-    groups = [dict(r) for r in cur.fetchall()]
-    names = {g.get("name") for g in groups}
+    for row in cur.fetchall():
+        group_name = (row["group_name"] or "").strip()
+        teacher_map.setdefault(group_name, []).append(
+            {
+                "id": int(row["id"]),
+                "full_name": row["full_name"],
+                "email": row["email"],
+            }
+        )
+    for group in groups:
+        teachers = teacher_map.get(group["name"], [])
+        group["teachers"] = teachers
+        group["teacher_id"] = teachers[0]["id"] if teachers else None
+        group["teacher_name"] = ", ".join(teacher["full_name"] for teacher in teachers) if teachers else None
     if "Без группы" not in names:
-        groups.append({"name": "Без группы", "teacher_id": None, "teacher_name": None})
+        groups.append({"name": "Без группы", "teacher_id": None, "teacher_name": None, "teachers": []})
     return groups
+
+
+def get_group_teachers(cur, group_name: str) -> list[dict[str, Any]]:
+    normalized = normalize_group_name(group_name)
+    if not normalized or normalized == "Без группы":
+        return []
+    cur.execute(
+        """
+        SELECT u.id, u.full_name, u.email
+        FROM group_teachers gt
+        JOIN users u ON u.id = gt.teacher_id
+        WHERE gt.group_name = ? AND u.role = 'teacher'
+        ORDER BY u.full_name
+        """,
+        (normalized,),
+    )
+    return [dict(row) for row in cur.fetchall()]
+
+
+def refresh_group_primary_teacher(cur, group_name: str) -> int | None:
+    normalized = normalize_group_name(group_name)
+    if not normalized or normalized == "Без группы":
+        return None
+    cur.execute(
+        "SELECT MIN(teacher_id) AS teacher_id FROM group_teachers WHERE group_name = ?",
+        (normalized,),
+    )
+    row = cur.fetchone()
+    teacher_id = int(row["teacher_id"]) if row and row["teacher_id"] else None
+    cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_id, normalized))
+    return teacher_id
 
 
 def find_group_teacher_id(cur, group_name: str) -> int | None:
     normalized = (group_name or "").strip()
     if not normalized or normalized == "Без группы":
         return None
+    cur.execute(
+        "SELECT MIN(teacher_id) AS teacher_id FROM group_teachers WHERE group_name = ?",
+        (normalized,),
+    )
+    row = cur.fetchone()
+    if row and row["teacher_id"]:
+        return int(row["teacher_id"])
     cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (normalized,))
     row = cur.fetchone()
     if not row:
         return None
     teacher_id = row["teacher_id"]
     return int(teacher_id) if teacher_id else None
+
+
+def add_group_teacher(cur, group_name: str, teacher_id: int) -> bool:
+    normalized = normalize_group_name(group_name)
+    if not normalized or normalized == "Без группы":
+        return False
+    inserted = bool(
+        insert_ignore(
+            cur,
+            "group_teachers",
+            ("group_name", "teacher_id"),
+            (normalized, teacher_id),
+            conflict_columns=("group_name", "teacher_id"),
+        )
+    )
+    refresh_group_primary_teacher(cur, normalized)
+    if inserted:
+        sync_teacher_group_assignments(cur, teacher_id, group_name=normalized)
+        cur.execute(
+            """
+            UPDATE users
+            SET assigned_teacher_id = COALESCE(NULLIF(assigned_teacher_id, 0), ?)
+            WHERE role = 'student' AND student_group = ?
+            """,
+            (teacher_id, normalized),
+        )
+    return inserted
+
+
+def remove_group_teacher(cur, group_name: str, teacher_id: int) -> bool:
+    normalized = normalize_group_name(group_name)
+    if not normalized or normalized == "Без группы":
+        return False
+    cur.execute(
+        "DELETE FROM group_teachers WHERE group_name = ? AND teacher_id = ?",
+        (normalized, teacher_id),
+    )
+    removed = cur.rowcount > 0
+    if not removed:
+        return False
+    cur.execute(
+        "DELETE FROM teaching_assignments WHERE teacher_id = ? AND group_name = ?",
+        (teacher_id, normalized),
+    )
+    next_teacher_id = refresh_group_primary_teacher(cur, normalized)
+    cur.execute(
+        """
+        UPDATE users
+        SET assigned_teacher_id = ?
+        WHERE role = 'student' AND student_group = ? AND assigned_teacher_id = ?
+        """,
+        (next_teacher_id, normalized, teacher_id),
+    )
+    return True
 
 
 def get_discipline_map(cur) -> dict[int, str]:
@@ -200,6 +309,10 @@ def get_teacher_owned_group_names(cur, teacher_id: int | None) -> list[str]:
         """
         SELECT DISTINCT group_name
         FROM (
+            SELECT gt.group_name
+            FROM group_teachers gt
+            WHERE gt.teacher_id = ?
+            UNION
             SELECT name AS group_name
             FROM groups
             WHERE teacher_id = ?
@@ -210,7 +323,7 @@ def get_teacher_owned_group_names(cur, teacher_id: int | None) -> list[str]:
         ) src
         ORDER BY group_name
         """,
-        (teacher_id, teacher_id),
+        (teacher_id, teacher_id, teacher_id),
     )
     return [normalize_group_name(row["group_name"]) for row in cur.fetchall()]
 
@@ -244,22 +357,6 @@ def sync_teacher_group_assignments(
                 )
             )
     return inserted
-
-
-def replace_group_teacher_assignments(
-    cur,
-    group_name: str | None,
-    previous_teacher_id: int | None,
-    next_teacher_id: int | None,
-) -> None:
-    normalized_group = normalize_group_name(group_name)
-    if previous_teacher_id:
-        cur.execute(
-            "DELETE FROM teaching_assignments WHERE teacher_id = ? AND group_name = ?",
-            (previous_teacher_id, normalized_group),
-        )
-    if next_teacher_id:
-        sync_teacher_group_assignments(cur, int(next_teacher_id), group_name=normalized_group)
 
 
 def detach_teacher_discipline_assignments(cur, teacher_id: int | None, discipline_id: int | None) -> None:
@@ -477,24 +574,9 @@ def build_groups_page_context(cur, selected_group: str | None = None) -> dict[st
     selected = None
     if selected_group:
         name = selected_group.strip()
-        teacher_card = None
-        if name != "Без группы":
-            cur.execute(
-                """
-                SELECT g.name, g.teacher_id, u.full_name AS teacher_name, u.email AS teacher_email
-                FROM groups g
-                LEFT JOIN users u ON u.id = g.teacher_id
-                WHERE g.name = ?
-                """,
-                (name,),
-            )
-            group_row = cur.fetchone()
-            if group_row and group_row["teacher_id"]:
-                teacher_card = {
-                    "id": group_row["teacher_id"],
-                    "full_name": group_row["teacher_name"],
-                    "email": group_row["teacher_email"],
-                }
+        teachers_for_group = get_group_teachers(cur, name) if name != "Без группы" else []
+        selected_teacher_ids = {int(item["id"]) for item in teachers_for_group}
+        available_teachers = [teacher for teacher in teachers if int(teacher["id"]) not in selected_teacher_ids]
 
         if name == "Без группы":
             cur.execute(
@@ -516,7 +598,12 @@ def build_groups_page_context(cur, selected_group: str | None = None) -> dict[st
                 (name,),
             )
         members = [user_row_to_dict(r) for r in cur.fetchall()]
-        selected = {"name": name, "teacher": teacher_card, "members": members}
+        selected = {
+            "name": name,
+            "teachers": teachers_for_group,
+            "available_teachers": available_teachers,
+            "members": members,
+        }
 
     return {
         "teachers": teachers,
@@ -3871,8 +3958,7 @@ def v1_admin_create_group(request: Request, group_name: str = Form(...), teacher
             add_flash(request, "Выбранный преподаватель не найден", "error")
             return RedirectResponse("/v1/admin/groups", status_code=302)
         cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
-        cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
-        sync_teacher_group_assignments(cur, int(assigned_teacher), group_name=normalized_name)
+        add_group_teacher(cur, normalized_name, int(assigned_teacher))
         conn.commit()
     except Exception:
         conn.close()
@@ -3916,8 +4002,7 @@ def admin_create_group(request: Request, group_name: str = Form(...), teacher_id
             add_flash(request, "Выбранный преподаватель не найден", "error")
             return RedirectResponse("/admin/groups", status_code=302)
         cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
-        cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
-        sync_teacher_group_assignments(cur, int(assigned_teacher), group_name=normalized_name)
+        add_group_teacher(cur, normalized_name, int(assigned_teacher))
         conn.commit()
     except Exception:
         conn.close()
@@ -4002,21 +4087,24 @@ def v1_admin_bind_group_teacher(request: Request, group_name: str, teacher_id: s
     name = group_name.replace("_", " ").strip()
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (name,))
-    prev_group_row = cur.fetchone()
-    previous_teacher_id = int(prev_group_row["teacher_id"]) if prev_group_row and prev_group_row["teacher_id"] else None
+    cur.execute("SELECT 1 FROM groups WHERE name = ?", (name,))
+    if not cur.fetchone():
+        conn.close()
+        add_flash(request, "Группа не найдена", "error")
+        return RedirectResponse("/v1/admin/groups", status_code=302)
     cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
     if not cur.fetchone():
         conn.close()
         add_flash(request, "Выбранный преподаватель не найден", "error")
         return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
-    cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
-    cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
-    replace_group_teacher_assignments(cur, name, previous_teacher_id, teacher_value)
+    linked = add_group_teacher(cur, name, teacher_value)
     conn.commit()
     conn.close()
-    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
-    add_flash(request, "Преподаватель закреплён за группой", "success")
+    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}, linked={linked}")
+    if linked:
+        add_flash(request, "Преподаватель добавлен к группе", "success")
+    else:
+        add_flash(request, "Этот преподаватель уже добавлен к группе", "info")
     return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
 
 
@@ -4035,21 +4123,62 @@ def admin_bind_group_teacher(request: Request, group_name: str, teacher_id: str 
     name = group_name.replace("_", " ").strip()
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (name,))
-    prev_group_row = cur.fetchone()
-    previous_teacher_id = int(prev_group_row["teacher_id"]) if prev_group_row and prev_group_row["teacher_id"] else None
+    cur.execute("SELECT 1 FROM groups WHERE name = ?", (name,))
+    if not cur.fetchone():
+        conn.close()
+        add_flash(request, "Группа не найдена", "error")
+        return RedirectResponse("/admin/groups", status_code=302)
     cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
     if not cur.fetchone():
         conn.close()
         add_flash(request, "Выбранный преподаватель не найден", "error")
         return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
-    cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
-    cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
-    replace_group_teacher_assignments(cur, name, previous_teacher_id, teacher_value)
+    linked = add_group_teacher(cur, name, teacher_value)
     conn.commit()
     conn.close()
-    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
-    add_flash(request, "Преподаватель закреплён за группой", "success")
+    audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}, linked={linked}")
+    if linked:
+        add_flash(request, "Преподаватель добавлен к группе", "success")
+    else:
+        add_flash(request, "Этот преподаватель уже добавлен к группе", "info")
+    return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
+
+
+@app.post("/v1/admin/groups/{group_name}/teachers/{teacher_id}/delete")
+def v1_admin_unbind_group_teacher(request: Request, group_name: str, teacher_id: int):
+    if not admin_panel_auth(request):
+        return RedirectResponse("/v1/admin", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    removed = remove_group_teacher(cur, name, int(teacher_id))
+    conn.commit()
+    conn.close()
+    audit_log(request, "unbind_group_teacher", details=f"group={name}, teacher_id={teacher_id}, removed={removed}")
+    if removed:
+        add_flash(request, "Преподаватель убран из группы", "success")
+    else:
+        add_flash(request, "Связь преподавателя с группой не найдена", "info")
+    return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
+
+
+@app.post("/admin/groups/{group_name}/teachers/{teacher_id}/delete")
+def admin_unbind_group_teacher(request: Request, group_name: str, teacher_id: int):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse("/login", status_code=302)
+    name = group_name.replace("_", " ").strip()
+    conn = connect()
+    cur = conn.cursor()
+    removed = remove_group_teacher(cur, name, int(teacher_id))
+    conn.commit()
+    conn.close()
+    audit_log(request, "unbind_group_teacher", details=f"group={name}, teacher_id={teacher_id}, removed={removed}")
+    if removed:
+        add_flash(request, "Преподаватель убран из группы", "success")
+    else:
+        add_flash(request, "Связь преподавателя с группой не найдена", "info")
     return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
 
 

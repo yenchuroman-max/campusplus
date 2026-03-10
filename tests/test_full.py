@@ -127,6 +127,8 @@ def _login_admin(c):
 def _create_group(db, name="БИ-41", teacher_id=None):
     cur = db.cursor()
     cur.execute("INSERT OR IGNORE INTO groups (name, teacher_id) VALUES (?, ?)", (name, teacher_id))
+    if teacher_id:
+        cur.execute("INSERT OR IGNORE INTO group_teachers (group_name, teacher_id) VALUES (?, ?)", (name, teacher_id))
     db.commit()
 
 
@@ -935,6 +937,49 @@ class TestAdminFlow:
         self._setup_admin(client, db)
         r = client.get("/admin/groups")
         assert r.status_code == 200
+
+    def test_admin_group_supports_multiple_teachers(self, client, db):
+        self._setup_admin(client, db)
+        teacher_one = _insert_user(db, role="teacher", login="g1@test.ru", password="pass123", full_name="Teacher One")
+        teacher_two = _insert_user(db, role="teacher", login="g2@test.ru", password="pass123", full_name="Teacher Two")
+        _create_group(db, "БИ-41.1", teacher_one)
+
+        r = client.post("/admin/groups/БИ-41.1/teacher", data={"teacher_id": str(teacher_two)}, follow_redirects=False)
+        assert r.status_code == 302
+
+        cur = db.cursor()
+        cur.execute(
+            "SELECT teacher_id FROM group_teachers WHERE group_name = ? ORDER BY teacher_id",
+            ("БИ-41.1",),
+        )
+        teacher_ids = [int(row[0]) for row in cur.fetchall()]
+        assert teacher_one in teacher_ids
+        assert teacher_two in teacher_ids
+
+        page = client.get("/admin/groups/БИ-41.1")
+        assert page.status_code == 200
+        assert "Teacher One" in page.text
+        assert "Teacher Two" in page.text
+
+    def test_admin_can_remove_teacher_from_group(self, client, db):
+        self._setup_admin(client, db)
+        teacher_one = _insert_user(db, role="teacher", login="g3@test.ru", password="pass123", full_name="Teacher Three")
+        teacher_two = _insert_user(db, role="teacher", login="g4@test.ru", password="pass123", full_name="Teacher Four")
+        _create_group(db, "БИ-41.2", teacher_one)
+        cur = db.cursor()
+        cur.execute("INSERT OR IGNORE INTO group_teachers (group_name, teacher_id) VALUES (?, ?)", ("БИ-41.2", teacher_two))
+        db.commit()
+
+        r = client.post(f"/admin/groups/БИ-41.2/teachers/{teacher_one}/delete", follow_redirects=False)
+        assert r.status_code == 302
+
+        cur.execute(
+            "SELECT teacher_id FROM group_teachers WHERE group_name = ? ORDER BY teacher_id",
+            ("БИ-41.2",),
+        )
+        teacher_ids = [int(row[0]) for row in cur.fetchall()]
+        assert teacher_one not in teacher_ids
+        assert teacher_two in teacher_ids
 
     def test_admin_disciplines_page(self, client, db):
         self._setup_admin(client, db)

@@ -17,7 +17,7 @@
     <form method="post" action="{{ base_prefix }}/groups/create" class="inline-group-form create-group-form">
       <input type="text" name="group_name" placeholder="Название группы" required>
       <select name="teacher_id" required>
-        <option value="">Преподаватель</option>
+        <option value="">Первый преподаватель</option>
         {% for t in teachers %}
           <option value="{{ t.id }}">{{ t.full_name }}</option>
         {% endfor %}
@@ -48,7 +48,12 @@
 
   <div class="groups-links" style="margin-bottom:14px;">
     {% for g in managed_groups %}
-      <a class="group-link-card" href="{{ base_prefix }}/groups/{{ g.name.replace(' ', '_') }}">{{ g.name }}</a>
+      <a class="group-link-card" href="{{ base_prefix }}/groups/{{ g.name.replace(' ', '_') }}">
+        {{ g.name }}
+        {% if g.teacher_name %}
+        <span class="muted" style="display:block; margin-top:6px;">{{ g.teacher_name }}</span>
+        {% endif %}
+      </a>
     {% endfor %}
   </div>
 
@@ -59,21 +64,30 @@
     {% if selected_group.name != 'Без группы' %}
     <form method="post" action="{{ base_prefix }}/groups/{{ selected_group.name.replace(' ', '_') }}/teacher" class="inline-group-form create-group-form" style="margin-bottom:10px;">
       <select name="teacher_id" required>
-        <option value="">Закрепить преподавателя</option>
-        {% for t in teachers %}
-          <option value="{{ t.id }}" {% if selected_group.teacher and selected_group.teacher.id == t.id %}selected{% endif %}>{{ t.full_name }}</option>
+        <option value="">Добавить преподавателя</option>
+        {% for t in selected_group.available_teachers %}
+          <option value="{{ t.id }}">{{ t.full_name }}</option>
         {% endfor %}
       </select>
-      <button class="button secondary" type="submit">Сохранить преподавателя</button>
+      <button class="button secondary" type="submit">Добавить преподавателя</button>
     </form>
     {% endif %}
 
     <div class="card" style="margin-bottom:10px;">
-      <div class="card-title">Преподаватель группы</div>
-      {% if selected_group.teacher %}
-        <div class="teacher-chip" style="font-size:14px;">{{ selected_group.teacher.full_name }} · логин: {{ selected_group.teacher.email }}</div>
+      <div class="card-title">Преподаватели группы</div>
+      {% if selected_group.teachers %}
+        <div class="actions-inline" style="margin-top:10px;">
+          {% for teacher in selected_group.teachers %}
+          <form method="post" action="{{ base_prefix }}/groups/{{ selected_group.name.replace(' ', '_') }}/teachers/{{ teacher.id }}/delete" style="margin:0;">
+            <button class="button secondary" type="submit">
+              {{ teacher.full_name }} · логин: {{ teacher.email }}
+            </button>
+          </form>
+          {% endfor %}
+        </div>
+        <p class="muted" style="margin-top:8px;">Нажатие на преподавателя убирает его из группы.</p>
       {% else %}
-        <div class="muted">Преподаватель не закреплён</div>
+        <div class="muted">Преподаватели ещё не назначены.</div>
       {% endif %}
     </div>
 
