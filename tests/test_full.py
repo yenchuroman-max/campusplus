@@ -1123,6 +1123,46 @@ class TestV2Teacher:
         r = client.get("/v2/teacher/tests")
         assert r.status_code == 200
 
+    def test_groups_page(self, client, db):
+        self._setup(client, db)
+        r = client.get("/v2/teacher/groups")
+        assert r.status_code == 200
+
+    def test_assign_group_to_discipline(self, client, db):
+        teacher_id = self._setup(client, db)
+        cur = db.cursor()
+        cur.execute("SELECT id FROM disciplines LIMIT 1")
+        discipline_id = int(cur.fetchone()[0])
+        cur.execute(
+            "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+            (teacher_id, discipline_id),
+        )
+        cur.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", ("BI-77",))
+        _insert_user(
+            db,
+            role="student",
+            login="group_bind@test.ru",
+            password="pass123",
+            full_name="Group Bind Student",
+            group="BI-77",
+        )
+        db.commit()
+
+        r = client.post(
+            "/v2/teacher/groups/assign",
+            data={"group_name": "BI-77", "discipline_id": str(discipline_id)},
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignments
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-77"),
+        )
+        assert cur.fetchone() is not None
+
     def test_students_page(self, client, db):
         self._setup(client, db)
         r = client.get("/v2/teacher/students")
@@ -1168,6 +1208,43 @@ class TestV2Teacher:
         assert 'data-group-name="G-10"' in body
         assert body.find('data-group-name="G-2"') < body.find('data-group-name="G-10"')
         assert body.find("Алексей Алексеев") < body.find("Виктор Викторов")
+
+    def test_students_page_backfills_attempt_group_assignments(self, client, db):
+        teacher_id = self._setup(client, db)
+        cur = db.cursor()
+        cur.execute("SELECT id FROM disciplines LIMIT 1")
+        discipline_id = int(cur.fetchone()[0])
+        cur.execute(
+            "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+            (teacher_id, discipline_id),
+        )
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="history_group@test.ru",
+            password="pass123",
+            full_name="History Group Student",
+            group="BI-88",
+        )
+        lecture_id = _insert_lecture(db, teacher_id, title="History Lecture", discipline_id=discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="History Test")
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, student_id, 91.0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+
+        r = client.get("/v2/teacher/students")
+        assert r.status_code == 200
+        assert "History Group Student" in r.text
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignments
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-88"),
+        )
+        assert cur.fetchone() is not None
 
     def test_student_performance_page(self, client, db):
         teacher_id = self._setup(client, db)
@@ -1221,7 +1298,7 @@ class TestV2Teacher:
         r = client.get("/v2/teacher/analytics")
         assert r.status_code == 200
 
-    def test_analytics_excludes_students_outside_assignment(self, client, db):
+    def test_analytics_backfills_students_from_existing_attempts(self, client, db):
         teacher_id = self._setup(client, db)
         discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-60")
         lecture_id = _insert_lecture(db, teacher_id, title="Analytics Scope", discipline_id=discipline_id)
@@ -1258,7 +1335,15 @@ class TestV2Teacher:
         r = client.get("/v2/teacher/analytics")
         assert r.status_code == 200
         assert "Visible Student" in r.text
-        assert "Hidden Student" not in r.text
+        assert "Hidden Student" in r.text
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignments
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-61"),
+        )
+        assert cur.fetchone() is not None
 
     def test_create_discipline(self, client, db):
         self._setup(client, db)

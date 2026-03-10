@@ -1,0 +1,114 @@
+{% extends "v2_teacher_layout.html" %}
+{% block teacher_content %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">Группы и аудитория</div>
+  <div class="card-desc">Преподаватель работает не с отдельными студентами, а с группами внутри своих дисциплин. Привяжите группу к дисциплине, и студенты этой группы автоматически появятся в разделах «Студенты» и «Успеваемость».</div>
+  <form method="post" action="/v2/teacher/groups/assign" class="inline-group-form" style="margin-top:12px;">
+    <select name="group_name" required>
+      <option value="">Выберите группу</option>
+      {% for group in unassigned_groups %}
+        <option value="{{ group.name }}">{{ group.name }}{% if group.student_count is not none %} (студентов: {{ group.student_count }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <select name="discipline_id" required>
+      <option value="">Дисциплина</option>
+      {% for discipline in disciplines %}
+        <option value="{{ discipline.id }}">{{ discipline.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">Привязать группу к дисциплине</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Мои группы по дисциплинам</div>
+  {% if managed_groups %}
+    <div class="admin-student-groups" style="margin-top:10px;">
+      {% for group in managed_groups %}
+      <section class="card group-column admin-student-group" data-group-name="{{ group.name }}">
+        <button
+          type="button"
+          class="group-toggle"
+          data-student-group-toggle
+          aria-expanded="false"
+          aria-controls="teacher-groups-{{ loop.index }}"
+        >
+          <span class="group-arrow" aria-hidden="true">›</span>
+          <span class="admin-student-group-title">{{ group.name }}</span>
+          <span class="muted" style="margin-left:auto;">Студентов: {{ group.student_count }}</span>
+        </button>
+        <div class="group-members admin-student-group-members" id="teacher-groups-{{ loop.index }}">
+          <div class="card" style="margin-bottom:10px;">
+            <div class="card-title">Дисциплины группы</div>
+            <div class="actions-inline" style="margin-top:8px;">
+              {% for discipline in group.disciplines %}
+                <form method="post" action="/v2/teacher/groups/unassign" style="margin:0;">
+                  <input type="hidden" name="group_name" value="{{ group.name }}">
+                  <input type="hidden" name="discipline_id" value="{{ discipline.id }}">
+                  <button class="button secondary" type="submit">{{ discipline.name }}</button>
+                </form>
+              {% endfor %}
+            </div>
+            {% if group.available_disciplines %}
+            <form method="post" action="/v2/teacher/groups/assign" class="inline-group-form" style="margin-top:10px;">
+              <input type="hidden" name="group_name" value="{{ group.name }}">
+              <select name="discipline_id" required>
+                <option value="">Добавить дисциплину</option>
+                {% for discipline in group.available_disciplines %}
+                  <option value="{{ discipline.id }}">{{ discipline.name }}</option>
+                {% endfor %}
+              </select>
+              <button class="button secondary" type="submit">Добавить</button>
+            </form>
+            {% endif %}
+            <p class="muted" style="margin-top:8px;">Нажатие на плашку дисциплины отвязывает эту группу от выбранной дисциплины.</p>
+          </div>
+
+          <div class="list admin-student-group-list">
+            {% for student in group.students %}
+              <div class="card admin-card user-card student-management-card">
+                <div class="card-head">
+                  <div class="card-icon">{{ student.full_name[0]|upper }}</div>
+                  <div style="flex:1; min-width:0;">
+                    <div class="card-title">{{ student.full_name }}</div>
+                    <div class="card-desc">Логин: {{ student.email }}</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="muted">Группа: {{ student.student_group or 'Без группы' }}</div>
+                  <div class="muted">Последний вход: {{ student.last_login }}</div>
+                </div>
+                <div class="card-footer actions-inline student-card-actions">
+                  <a class="button secondary" href="/v2/teacher/students/{{ student.id }}/performance">Успеваемость</a>
+                  <a class="button secondary" href="/v2/teacher/students/{{ student.id }}/edit">Редактировать</a>
+                </div>
+              </div>
+            {% else %}
+              <p class="muted">В этой группе пока нет студентов.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top:8px;">У преподавателя пока нет привязанных групп. Выберите группу и дисциплину выше.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-student-group-toggle]');
+    toggles.forEach(function (toggle) {
+      toggle.addEventListener('click', function () {
+        var container = toggle.closest('.group-column');
+        if (!container) return;
+        var opened = container.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', opened ? 'true' : 'false');
+      });
+    });
+  });
+</script>
+{% endblock %}

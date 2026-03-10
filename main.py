@@ -180,6 +180,19 @@ def normalize_group_name(value: str | None) -> str:
     return (value or "").strip()
 
 
+def natural_group_sort_key(value: str) -> tuple:
+    parts = re.split(r"(\d+)", (value or "").lower())
+    key: list[Any] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.isdigit():
+            key.append((0, int(part)))
+        else:
+            key.append((1, part))
+    return tuple(key)
+
+
 def get_teacher_owned_group_names(cur, teacher_id: int | None) -> list[str]:
     if not teacher_id:
         return []
@@ -276,6 +289,69 @@ def get_teacher_assignment_groups(cur, teacher_id: int | None, discipline_id: in
         params,
     )
     return [normalize_group_name(row["group_name"]) for row in cur.fetchall()]
+
+
+def get_all_group_names(cur) -> list[str]:
+    cur.execute("SELECT name FROM groups ORDER BY name")
+    names = {(row["name"] or "").strip() for row in cur.fetchall() if (row["name"] or "").strip()}
+    cur.execute(
+        """
+        SELECT DISTINCT COALESCE(student_group, '') AS group_name
+        FROM users
+        WHERE role = 'student' AND TRIM(COALESCE(student_group, '')) <> ''
+        """
+    )
+    for row in cur.fetchall():
+        group_name = (row["group_name"] or "").strip()
+        if group_name:
+            names.add(group_name)
+    return sorted(names, key=natural_group_sort_key)
+
+
+def sync_teacher_attempt_group_assignments(
+    cur,
+    teacher_id: int | None,
+    discipline_id: int | None = None,
+) -> int:
+    if not teacher_id:
+        return 0
+    params: tuple[Any, ...] = (teacher_id, teacher_id)
+    filter_sql = ""
+    if discipline_id:
+        filter_sql = " AND lectures.discipline_id = ?"
+        params = (teacher_id, teacher_id, discipline_id)
+
+    cur.execute(
+        f"""
+        SELECT DISTINCT
+            lectures.discipline_id AS discipline_id,
+            COALESCE(users.student_group, '') AS group_name
+        FROM attempts
+        JOIN tests ON tests.id = attempts.test_id
+        JOIN lectures ON lectures.id = tests.lecture_id
+        JOIN users ON users.id = attempts.student_id
+        JOIN teacher_disciplines td
+          ON td.teacher_id = ?
+         AND td.discipline_id = lectures.discipline_id
+        WHERE lectures.teacher_id = ?
+          AND users.role = 'student'
+          AND TRIM(COALESCE(users.student_group, '')) <> ''{filter_sql}
+        """,
+        params,
+    )
+
+    inserted = 0
+    for row in cur.fetchall():
+        inserted += int(
+            insert_ignore(
+                cur,
+                "teaching_assignments",
+                ("teacher_id", "discipline_id", "group_name"),
+                (teacher_id, int(row["discipline_id"]), normalize_group_name(row["group_name"])),
+                conflict_columns=("teacher_id", "discipline_id", "group_name"),
+            )
+        )
+    return inserted
 
 
 def get_teacher_students(cur, teacher_id: int | None, query: str = "") -> list[dict[str, Any]]:
@@ -476,18 +552,6 @@ def fetch_users_by_role(cur, role: str, query: str = "") -> list[dict[str, Any]]
 
 
 def group_students_by_group(students: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    def _natural_sort_key(value: str) -> tuple:
-        parts = re.split(r"(\d+)", (value or "").lower())
-        key: list[Any] = []
-        for part in parts:
-            if not part:
-                continue
-            if part.isdigit():
-                key.append((0, int(part)))
-            else:
-                key.append((1, part))
-        return tuple(key)
-
     grouped: dict[str, list[dict[str, Any]]] = {}
     for student in students:
         group_name = (student.get("student_group") or "").strip() or "Без группы"
@@ -501,7 +565,7 @@ def group_students_by_group(students: list[dict[str, Any]]) -> list[dict[str, An
 
     ordered_names = sorted(
         [name for name in grouped.keys() if name != "Без группы"],
-        key=_natural_sort_key,
+        key=natural_group_sort_key,
     )
     if "Без группы" in grouped:
         ordered_names.append("Без группы")
@@ -4649,6 +4713,8 @@ def v2_teacher_disciplines(request: Request):
 
     conn = connect()
     cur = conn.cursor()
+    if sync_teacher_attempt_group_assignments(cur, int(user["id"])):
+        conn.commit()
     cur.execute(
         """
         SELECT d.id, d.name
@@ -4698,9 +4764,20 @@ def v2_teacher_disciplines(request: Request):
         )
         student_count = int(cur.fetchone()["cnt"])
 
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT ta.group_name) AS cnt
+            FROM teaching_assignments ta
+            WHERE ta.teacher_id = ? AND ta.discipline_id = ?
+            """,
+            (user["id"], discipline["id"]),
+        )
+        group_count = int(cur.fetchone()["cnt"])
+
         discipline["lecture_count"] = lecture_count
         discipline["test_count"] = test_count
         discipline["student_count"] = student_count
+        discipline["group_count"] = group_count
 
     conn.close()
     return render(
@@ -4810,6 +4887,193 @@ def v2_teacher_attach_discipline(request: Request, discipline_id: int = Form(...
     else:
         add_flash(request, f"Дисциплина «{discipline_name}» уже была у вас", "info")
     return RedirectResponse("/v2/teacher/disciplines", status_code=302)
+
+
+@app.get("/v2/teacher/groups", response_class=HTMLResponse)
+def v2_teacher_groups(request: Request):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    if sync_teacher_attempt_group_assignments(cur, int(user["id"])):
+        conn.commit()
+
+    disciplines = get_teacher_disciplines(cur, int(user["id"]))
+    all_group_names = get_all_group_names(cur)
+
+    cur.execute(
+        """
+        SELECT id, full_name, email, last_login, student_group
+        FROM users
+        WHERE role = 'student'
+        ORDER BY full_name
+        """
+    )
+    all_students = [user_row_to_dict(row) for row in cur.fetchall()]
+    members_by_group = {
+        item["name"]: item["students"]
+        for item in group_students_by_group(all_students)
+    }
+
+    cur.execute(
+        """
+        SELECT ta.group_name, ta.discipline_id, d.name AS discipline_name
+        FROM teaching_assignments ta
+        JOIN disciplines d ON d.id = ta.discipline_id
+        WHERE ta.teacher_id = ?
+        ORDER BY ta.group_name, d.name
+        """,
+        (user["id"],),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    assigned_map: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        group_name = normalize_group_name(row["group_name"])
+        assigned_map.setdefault(group_name, []).append(
+            {
+                "id": int(row["discipline_id"]),
+                "name": row["discipline_name"],
+            }
+        )
+
+    managed_group_names = sorted(
+        [name for name in assigned_map.keys() if name],
+        key=natural_group_sort_key,
+    )
+    managed_groups: list[dict[str, Any]] = []
+    for group_name in managed_group_names:
+        assigned_disciplines = sorted(assigned_map.get(group_name, []), key=lambda item: item["name"].lower())
+        available_disciplines = [
+            item for item in disciplines if int(item["id"]) not in {int(d["id"]) for d in assigned_disciplines}
+        ]
+        managed_groups.append(
+            {
+                "name": group_name,
+                "student_count": len(members_by_group.get(group_name, [])),
+                "students": members_by_group.get(group_name, []),
+                "disciplines": assigned_disciplines,
+                "available_disciplines": available_disciplines,
+            }
+        )
+
+    unassigned_groups = [
+        {
+            "name": name,
+            "student_count": len(members_by_group.get(name, [])),
+        }
+        for name in all_group_names
+        if name and name not in assigned_map
+    ]
+
+    conn.close()
+    return render(
+        request,
+        "v2_teacher_groups.html",
+        {
+            "active_tab": "groups",
+            "disciplines": disciplines,
+            "managed_groups": managed_groups,
+            "unassigned_groups": unassigned_groups,
+        },
+    )
+
+
+@app.post("/v2/teacher/groups/assign")
+def v2_teacher_assign_group_to_discipline(
+    request: Request,
+    group_name: str = Form(""),
+    discipline_id: int = Form(...),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    normalized_group = normalize_group_name(group_name)
+    if not normalized_group:
+        add_flash(request, "Выберите группу", "error")
+        return RedirectResponse("/v2/teacher/groups", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT d.id, d.name
+        FROM teacher_disciplines td
+        JOIN disciplines d ON d.id = td.discipline_id
+        WHERE td.teacher_id = ? AND td.discipline_id = ?
+        """,
+        (user["id"], discipline_id),
+    )
+    discipline = cur.fetchone()
+    if not discipline:
+        conn.close()
+        add_flash(request, "Дисциплина недоступна", "error")
+        return RedirectResponse("/v2/teacher/groups", status_code=302)
+
+    linked = bool(
+        insert_ignore(
+            cur,
+            "teaching_assignments",
+            ("teacher_id", "discipline_id", "group_name"),
+            (user["id"], discipline_id, normalized_group),
+            conflict_columns=("teacher_id", "discipline_id", "group_name"),
+        )
+    )
+    conn.commit()
+    conn.close()
+
+    if linked:
+        add_flash(request, f"Группа «{normalized_group}» привязана к дисциплине «{discipline['name']}»", "success")
+    else:
+        add_flash(request, f"Группа «{normalized_group}» уже привязана к дисциплине «{discipline['name']}»", "info")
+    return RedirectResponse("/v2/teacher/groups", status_code=302)
+
+
+@app.post("/v2/teacher/groups/unassign")
+def v2_teacher_unassign_group_from_discipline(
+    request: Request,
+    group_name: str = Form(""),
+    discipline_id: int = Form(...),
+):
+    ensure_start_session_cookie(request)
+    user = get_current_user(request)
+    if not user or user["role"] != "teacher":
+        return RedirectResponse("/login", status_code=302)
+
+    normalized_group = normalize_group_name(group_name)
+    if not normalized_group:
+        add_flash(request, "Группа не найдена", "error")
+        return RedirectResponse("/v2/teacher/groups", status_code=302)
+
+    conn = connect()
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM disciplines WHERE id = ?", (discipline_id,))
+    discipline = cur.fetchone()
+    if not discipline:
+        conn.close()
+        add_flash(request, "Дисциплина не найдена", "error")
+        return RedirectResponse("/v2/teacher/groups", status_code=302)
+
+    cur.execute(
+        """
+        DELETE FROM teaching_assignments
+        WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+        """,
+        (user["id"], discipline_id, normalized_group),
+    )
+    detached = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+
+    if detached:
+        add_flash(request, f"Группа «{normalized_group}» отвязана от дисциплины «{discipline['name']}»", "success")
+    else:
+        add_flash(request, f"Привязка группы «{normalized_group}» к дисциплине «{discipline['name']}» не найдена", "info")
+    return RedirectResponse("/v2/teacher/groups", status_code=302)
 
 
 @app.post("/v2/teacher/disciplines/{discipline_id}/detach")
@@ -4934,6 +5198,8 @@ def v2_teacher_students(request: Request):
         return RedirectResponse("/login", status_code=302)
     conn = connect()
     cur = conn.cursor()
+    if sync_teacher_attempt_group_assignments(cur, int(user["id"])):
+        conn.commit()
     available_groups = [group for group in get_teacher_assignment_groups(cur, int(user["id"])) if group]
     students = get_teacher_students(cur, int(user["id"]))
     grouped_students = group_students_by_group(students)
@@ -4956,6 +5222,7 @@ def build_teacher_student_performance_context(
     student_id: int,
     discipline_filter: int | None = None,
 ) -> dict[str, Any] | None:
+    sync_teacher_attempt_group_assignments(cur, teacher_id, discipline_filter)
     cur.execute(
         """
         SELECT id, full_name, email, last_login, student_group
@@ -5407,6 +5674,8 @@ def v2_teacher_analytics(request: Request):
 
     conn = connect()
     cur = conn.cursor()
+    if sync_teacher_attempt_group_assignments(cur, int(user["id"]), discipline_filter):
+        conn.commit()
     cur.execute(
         """
         SELECT d.id, d.name
