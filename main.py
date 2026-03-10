@@ -295,14 +295,14 @@ def get_teacher_students(cur, teacher_id: int | None, query: str = "") -> list[d
         params = (teacher_id, like, like, like)
     cur.execute(
         f"""
-        SELECT DISTINCT u.id, u.full_name, u.email, u.last_login, u.student_group
+        SELECT DISTINCT u.id, u.full_name, u.email, u.last_login, COALESCE(u.student_group, '') AS student_group
         FROM users u
         JOIN teaching_assignments ta
           ON ta.teacher_id = ?
          AND ta.group_name = COALESCE(u.student_group, '')
         WHERE u.role = 'student'
         {search_sql}
-        ORDER BY COALESCE(u.student_group, ''), u.full_name
+        ORDER BY student_group, u.full_name
         """,
         params,
     )
