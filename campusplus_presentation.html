@@ -1,0 +1,1002 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CampusPlus - презентация проекта</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Unbounded:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #e8edf7;
+      --bg-accent: #dbe5f7;
+      --card: rgba(249, 252, 255, 0.94);
+      --line: #c8d3e6;
+      --text: #22314a;
+      --muted: #5f7090;
+      --brand: #cb7087;
+      --brand-2: #5e79c9;
+      --ok: #47b58a;
+      --shadow: 0 20px 45px rgba(36, 56, 96, 0.15);
+      --screen-bg: #f4f7fd;
+    }
+
+    body[data-theme="dark"] {
+      --bg: #08162d;
+      --bg-accent: #0f2448;
+      --card: rgba(11, 28, 56, 0.93);
+      --line: #1f3b66;
+      --text: #e6efff;
+      --muted: #a5b8dc;
+      --brand: #d08497;
+      --brand-2: #7ea1ff;
+      --ok: #5ac7a0;
+      --shadow: 0 20px 45px rgba(2, 8, 20, 0.55);
+      --screen-bg: #0b2144;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: "Manrope", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(203, 112, 135, 0.22), transparent 35%),
+        radial-gradient(circle at 85% 12%, rgba(94, 121, 201, 0.2), transparent 30%),
+        linear-gradient(160deg, var(--bg), var(--bg-accent));
+      transition: background 0.35s ease, color 0.35s ease;
+    }
+
+    .shell {
+      width: min(1800px, 100% - 32px);
+      margin: 16px auto;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(255,255,255,0.12), transparent 60%);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-logo-shell {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 20px rgba(56, 84, 138, 0.18);
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: clamp(18px, 2vw, 24px);
+      font-family: "Unbounded", sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: linear-gradient(120deg, var(--brand), #cb7f9c);
+      color: #fff;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+
+    .btn.ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--line);
+      box-shadow: none;
+    }
+
+    .btn.secondary {
+      background: linear-gradient(120deg, var(--brand-2), #6e8bda);
+    }
+
+    .jump-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      scrollbar-width: thin;
+    }
+
+    .jump-row::-webkit-scrollbar { height: 8px; }
+    .jump-row::-webkit-scrollbar-thumb {
+      border-radius: 8px;
+      background: rgba(102, 123, 167, 0.45);
+    }
+
+    .jump-btn {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .jump-btn.active {
+      color: #fff;
+      background: linear-gradient(120deg, var(--brand), #c58ca9);
+      border-color: transparent;
+      box-shadow: 0 8px 18px rgba(203,112,135,0.32);
+    }
+
+    .deck {
+      min-height: calc(100vh - 250px);
+      padding: 20px;
+    }
+
+    .slide {
+      display: none;
+      min-height: calc(100vh - 290px);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: linear-gradient(150deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08));
+      padding: clamp(16px, 2.2vw, 30px);
+      gap: clamp(16px, 2vw, 26px);
+      align-items: stretch;
+      animation: fadeIn 0.35s ease;
+    }
+
+    .slide.active { display: grid; }
+
+    .slide.split { grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.35fr); }
+    .slide.cover { grid-template-columns: 1fr; }
+    .slide.cards { grid-template-columns: 1fr; }
+
+    .headline {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .title {
+      margin: 0;
+      font-family: "Unbounded", sans-serif;
+      font-size: clamp(28px, 4.2vw, 56px);
+      line-height: 1.04;
+      letter-spacing: -0.02em;
+    }
+
+    .title.medium { font-size: clamp(24px, 3.3vw, 44px); }
+
+    .lead {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(16px, 1.6vw, 22px);
+      line-height: 1.5;
+      max-width: 70ch;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.28);
+    }
+
+    .points {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .points li {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 11px 13px;
+      background: rgba(255, 255, 255, 0.25);
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .points li strong { color: var(--brand); }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .visual {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 10px;
+      background: rgba(255,255,255,0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .visual img {
+      width: 100%;
+      height: min(70vh, 760px);
+      border-radius: 12px;
+      object-fit: contain;
+      background: var(--screen-bg);
+      border: 1px solid var(--line);
+    }
+
+    .visual figcaption {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(200px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+      background: rgba(255,255,255,0.26);
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .step-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .step-btn {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.22);
+      color: var(--text);
+      font-weight: 700;
+      padding: 12px 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    .step-btn:hover {
+      border-color: transparent;
+      color: #fff;
+      background: linear-gradient(130deg, var(--brand), #cc8ea5);
+    }
+
+    .phones {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(210px, 1fr));
+      gap: 12px;
+    }
+
+    .phone {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.24);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .phone img {
+      width: 100%;
+      height: min(68vh, 720px);
+      object-fit: contain;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--screen-bg);
+    }
+
+    .phone span {
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: auto minmax(240px, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 18px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .status {
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+    }
+
+    .counter {
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .progress {
+      width: min(560px, 100%);
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: rgba(255,255,255,0.3);
+    }
+
+    .progress i {
+      display: block;
+      width: 0;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--brand), var(--ok));
+      transition: width 0.28s ease;
+    }
+
+    .hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1280px) {
+      .slide.split { grid-template-columns: 1fr; }
+      .visual img { height: min(56vh, 620px); }
+      .phones { grid-template-columns: repeat(2, minmax(200px, 1fr)); }
+      .step-grid { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+    }
+
+    @media (max-width: 820px) {
+      .shell { width: calc(100% - 14px); margin: 8px auto; border-radius: 16px; }
+      .topbar { padding: 10px 12px; }
+      .deck { padding: 12px; min-height: auto; }
+      .slide { min-height: auto; padding: 14px; }
+      .title { font-size: clamp(24px, 8vw, 36px); }
+      .phones, .grid-3, .step-grid { grid-template-columns: 1fr; }
+      .footer { grid-template-columns: 1fr; justify-items: center; }
+      .progress { width: 100%; }
+    }
+  </style>
+</head>
+<body data-theme="light">
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-logo-shell" aria-hidden="true">
+          <img class="brand-logo" src="app/static/img/sgugit-mark.png" alt="" />
+        </span>
+        <div>
+          <h1>КампусПлюс</h1>
+          <p>Презентация продукта для защиты диплома</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="themeToggle" class="btn ghost" type="button">Тема: светлая</button>
+        <a class="btn secondary" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Открыть демо</a>
+      </div>
+    </header>
+
+    <nav id="jumpRow" class="jump-row" aria-label="Навигация по слайдам"></nav>
+
+    <main class="deck">
+      <section class="slide cover active" data-title="О проекте">
+        <div class="headline">
+          <span class="kicker">Дипломный проект</span>
+          <h2 class="title">CampusPlus: цифровой контур контроля знаний</h2>
+          <p class="lead">Веб-сервис для преподавателя, студента и администратора: создание тестов, прохождение, аналитика успеваемости и работа с группами в одном интерфейсе.</p>
+          <div class="chip-row">
+            <span class="chip">FastAPI + Jinja2</span>
+            <span class="chip">Роли: преподаватель / студент / админ</span>
+            <span class="chip">QR-поток для теста на паре</span>
+            <span class="chip">Светлая и тёмная тема</span>
+          </div>
+          <div class="actions">
+            <a class="btn" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Открыть сайт</a>
+            <button class="btn ghost" data-go="4" type="button">Мини-гайд преподавателя</button>
+            <button class="btn ghost" data-go="12" type="button">Показать мобильную версию</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Проблема и решение">
+        <div class="headline">
+          <span class="kicker">Контекст</span>
+          <h2 class="title medium">Проблема преподавателя: проверка знаний занимает много времени</h2>
+          <ul class="points">
+            <li><strong>До:</strong> тесты создаются вручную, рассылка и проверка фрагментированы.</li>
+            <li><strong>После:</strong> преподаватель создает дисциплину, генерирует тест и запускает прохождение по QR на занятии.</li>
+            <li><strong>Результат:</strong> меньше ручной рутины, выше прозрачность успеваемости по группам.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="5" type="button">Смотреть пошагово</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/01_home_desktop.png" alt="Главная страница CampusPlus" loading="lazy" />
+          <figcaption>Реальный скрин: главная страница проекта</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide cards" data-title="Роли в системе">
+        <div class="headline">
+          <span class="kicker">Пользователи</span>
+          <h2 class="title medium">Кто работает в CampusPlus</h2>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Преподаватель</h3>
+              <p>Создает дисциплины, лекции и тесты, публикует тест через QR, смотрит аналитику по студентам и группам.</p>
+            </article>
+            <article class="card">
+              <h3>Студент</h3>
+              <p>Проходит тесты по дисциплинам, видит историю попыток, баллы и разбор ошибок в личном кабинете.</p>
+            </article>
+            <article class="card">
+              <h3>Админ</h3>
+              <p>Поддерживает структуру пользователей и групп, контролирует доступы, следит за целостностью данных.</p>
+            </article>
+          </div>
+          <p class="lead">Ниже идет мини‑гайд по рабочему сценарию преподавателя от входа до аналитики.</p>
+          <div class="actions">
+            <button class="btn" data-go="4" type="button">Запустить гайд</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide cards" data-title="Мини-гайд преподавателя">
+        <div class="headline">
+          <span class="kicker">Quick start</span>
+          <h2 class="title medium">Что нажимать преподавателю: 5 шагов</h2>
+          <div class="step-grid">
+            <button class="step-btn" data-go="5" type="button">1. Войти и открыть панель преподавателя</button>
+            <button class="step-btn" data-go="6" type="button">2. Создать/проверить дисциплину и лекцию</button>
+            <button class="step-btn" data-go="7" type="button">3. Создать тест: AI или вручную</button>
+            <button class="step-btn" data-go="8" type="button">4. Опубликовать тест и выдать QR</button>
+            <button class="step-btn" data-go="9" type="button">5. Проверить результаты и слабые места</button>
+          </div>
+          <ul class="points">
+            <li>Если нужно быстро: сначала <strong>QR</strong>, потом проверка в аналитике.</li>
+            <li>Если нужна точная настройка: сначала <strong>дисциплина и лекция</strong>, потом ручной редактор теста.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Шаг 1: вход и панель">
+        <div class="headline">
+          <span class="kicker">Шаг 1</span>
+          <h2 class="title medium">Войти как преподаватель и открыть рабочую панель</h2>
+          <ul class="points">
+            <li>Нажать <strong>Вход</strong> в верхнем меню.</li>
+            <li>Ввести логин/пароль преподавателя.</li>
+            <li>Перейти в <strong>Панель преподавателя</strong> через шапку сайта.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="6" type="button">Дальше: дисциплины</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/04_teacher_panel_desktop.png" alt="Панель преподавателя" loading="lazy" />
+          <figcaption>Реальный скрин: раздел преподавателя</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Шаг 2: дисциплины и лекции">
+        <div class="headline">
+          <span class="kicker">Шаг 2</span>
+          <h2 class="title medium">Добавить дисциплину и подготовить лекцию</h2>
+          <ul class="points">
+            <li>В панели нажать <strong>Дисциплины</strong> и создать/выбрать нужную.</li>
+            <li>Нажать <strong>Новая лекция</strong>, указать тему и цель.</li>
+            <li>Привязать тест к дисциплине для корректной аналитики по предмету.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="7" type="button">Дальше: тест</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/05_teacher_lectures_desktop.png" alt="Раздел лекций преподавателя" loading="lazy" />
+          <figcaption>Реальный скрин: работа с лекциями и дисциплинами</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Шаг 3: создание теста">
+        <div class="headline">
+          <span class="kicker">Шаг 3</span>
+          <h2 class="title medium">Собрать тест: генерация AI или ручной конструктор</h2>
+          <ul class="points">
+            <li><strong>AI-режим:</strong> задаем тему, дисциплину, уровень сложности и число вопросов.</li>
+            <li><strong>Ручной режим:</strong> преподаватель сам задает варианты и правильные ответы.</li>
+            <li><strong>Важно:</strong> на итог генерации влияют точность темы, ограничения и формат ответов.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="8" type="button">Дальше: публикация</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/06_teacher_tests_desktop.png" alt="Создание и редактирование тестов" loading="lazy" />
+          <figcaption>Реальный скрин: редактор и список тестов преподавателя</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Шаг 4: публикация и QR">
+        <div class="headline">
+          <span class="kicker">Шаг 4</span>
+          <h2 class="title medium">Опубликовать тест и выдать QR студентам</h2>
+          <ul class="points">
+            <li>После проверки нажать <strong>Опубликовать</strong>.</li>
+            <li>Открыть QR на экране аудитории: студенты сразу переходят к тесту.</li>
+            <li>Если студент не авторизован, система ведет в вход/регистрацию и возвращает в тест.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="9" type="button">Дальше: аналитика</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/07_teacher_qr_desktop.png" alt="QR-код для теста" loading="lazy" />
+          <figcaption>Реальный скрин: запуск теста по QR</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Шаг 5: аналитика">
+        <div class="headline">
+          <span class="kicker">Шаг 5</span>
+          <h2 class="title medium">Смотреть баллы, историю и проблемные темы</h2>
+          <ul class="points">
+            <li>Открыть раздел успеваемости в кабинете преподавателя.</li>
+            <li>Проверить средний балл по группам и по каждому студенту.</li>
+            <li>Использовать результаты для точечной доработки лекций и повторения.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="10" type="button">Сценарий студента</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/10_student_analytics_desktop.png" alt="Аналитика по тестам" loading="lazy" />
+          <figcaption>Реальный скрин: история тестирований и разбор результатов</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Сценарий студента: старт">
+        <div class="headline">
+          <span class="kicker">Студент</span>
+          <h2 class="title medium">Студент видит дисциплины и доступные тесты в одном кабинете</h2>
+          <ul class="points">
+            <li>После входа показываются дисциплины преподавателя.</li>
+            <li>Переход в тест идет по кнопке или через QR с занятия.</li>
+            <li>В личном кабинете доступна история результатов.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="11" type="button">Показать тестирование</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/08_student_dashboard_desktop.png" alt="Кабинет студента" loading="lazy" />
+          <figcaption>Реальный скрин: стартовый дашборд студента</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Сценарий студента: тест">
+        <div class="headline">
+          <span class="kicker">Студент</span>
+          <h2 class="title medium">Прохождение теста и обратная связь по попытке</h2>
+          <ul class="points">
+            <li>Тест проходит в веб-интерфейсе без установки приложений.</li>
+            <li>После отправки показывается результат и запись в историю.</li>
+            <li>Преподаватель сразу видит обновление статистики по группе.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="12" type="button">Показать мобильную версию</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/09_student_tests_desktop.png" alt="Прохождение теста студентом" loading="lazy" />
+          <figcaption>Реальный скрин: интерфейс прохождения теста</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide cards" data-title="Мобильный вход и регистрация">
+        <div class="headline">
+          <span class="kicker">Mobile</span>
+          <h2 class="title medium">Мобильный сценарий: вход в систему за 1 минуту</h2>
+          <div class="phones">
+            <div class="phone">
+              <img src="mobile_screens/01_home_mobile.png" alt="Мобильная главная" loading="lazy" />
+              <span>Главная страница</span>
+            </div>
+            <div class="phone">
+              <img src="mobile_screens/03_login_mobile.png" alt="Мобильный вход" loading="lazy" />
+              <span>Экран входа</span>
+            </div>
+            <div class="phone">
+              <img src="mobile_screens/03_register_mobile.png" alt="Мобильная регистрация" loading="lazy" />
+              <span>Регистрация студента</span>
+            </div>
+          </div>
+          <p class="lead">Это свежие скрины текущей версии проекта, снятые с мобильного потока.</p>
+        </div>
+      </section>
+
+      <section class="slide cards" data-title="Мобильное обучение">
+        <div class="headline">
+          <span class="kicker">Mobile</span>
+          <h2 class="title medium">Мобильный сценарий: преподаватель и студент в работе</h2>
+          <div class="phones">
+            <div class="phone">
+              <img src="mobile_screens/05_teacher_panel_mobile.png" alt="Мобильная панель преподавателя" loading="lazy" />
+              <span>Панель преподавателя</span>
+            </div>
+            <div class="phone">
+              <img src="mobile_screens/10_student_dashboard_mobile.png" alt="Мобильный дашборд студента" loading="lazy" />
+              <span>Кабинет студента</span>
+            </div>
+            <div class="phone">
+              <img src="mobile_screens/11_student_tests_mobile.png" alt="Мобильное прохождение теста" loading="lazy" />
+              <span>Прохождение тестов</span>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn" data-go="14" type="button">Роль админа</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Роль админа">
+        <div class="headline">
+          <span class="kicker">Администратор</span>
+          <h2 class="title medium">Админ в системе: поддержка порядка и доступов</h2>
+          <ul class="points">
+            <li>Ведет состав пользователей и групп.</li>
+            <li>Следит, чтобы студенты и преподаватели были в правильных ролях.</li>
+            <li>Проверяет структуру дисциплин и исправляет организационные ошибки.</li>
+          </ul>
+          <p class="lead">Админ нужен как операционный контур, но основной поток обучения идет через преподавателя и студента.</p>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/12_admin_groups_desktop.png" alt="Админка CampusPlus" loading="lazy" />
+          <figcaption>Реальный скрин: управление группами в админке</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide cards" data-title="Кейсы и внедрение">
+        <div class="headline">
+          <span class="kicker">Применение</span>
+          <h2 class="title medium">Реальные кейсы использования в учебном процессе</h2>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Кейс 1: входной контроль</h3>
+              <p>На первой паре преподаватель показывает QR, группа проходит тест за 8-10 минут. По результатам сразу видно стартовый уровень.</p>
+            </article>
+            <article class="card">
+              <h3>Кейс 2: модульная проверка</h3>
+              <p>После блока лекций создается тест по дисциплине. Аналитика показывает темы, где просадка, и помогает скорректировать следующее занятие.</p>
+            </article>
+            <article class="card">
+              <h3>Кейс 3: отработка долгов</h3>
+              <p>Студенты с низким результатом получают повторные тесты по слабым темам. Преподаватель фиксирует прогресс в одном интерфейсе.</p>
+            </article>
+          </div>
+          <ul class="points">
+            <li><strong>Как использовать уже сейчас:</strong> выбрать дисциплину, подготовить 1 лекцию и 1 тест, провести пилот на одной группе.</li>
+            <li><strong>Дальше:</strong> расширить на весь поток и сравнить результаты по семестру.</li>
+          </ul>
+          <div class="actions">
+            <a class="btn" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Перейти в CampusPlus</a>
+            <button class="btn secondary" data-go="16" type="button">E2E: преподаватель</button>
+            <button class="btn ghost" data-go="1" type="button">К первому слайду</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="E2E: ручной конструктор">
+        <div class="headline">
+          <span class="kicker">E2E: Шаг A</span>
+          <h2 class="title medium">Ручное создание теста в конструкторе</h2>
+          <ul class="points">
+            <li>Преподаватель открывает <strong>Ручной тест</strong> из панели.</li>
+            <li>Выбирает лекцию и вводит вопросы/варианты ответов вручную.</li>
+            <li>После сохранения тест создается в <strong>draft</strong> и сразу доступен для редактирования.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="17" type="button">Следующий шаг E2E</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/16_teacher_manual_test_form_desktop.png" alt="Ручной конструктор теста" loading="lazy" />
+          <figcaption>Реальный скрин: ручной конструктор теста</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="E2E: редактирование теста">
+        <div class="headline">
+          <span class="kicker">E2E: Шаг B</span>
+          <h2 class="title medium">Редактирование, сохранение и публикация</h2>
+          <ul class="points">
+            <li>В редакторе можно править формулировки, варианты и правильные ответы.</li>
+            <li><strong>Сохранить изменения</strong> фиксирует правки, <strong>Опубликовать</strong> открывает тест студентам.</li>
+            <li>После публикации преподаватель переходит к QR для запуска на паре.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="18" type="button">Показать мониторинг</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/06_teacher_tests_desktop.png" alt="Редактирование теста преподавателем" loading="lazy" />
+          <figcaption>Реальный скрин: правка вопросов и публикация теста</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="E2E: мониторинг студента">
+        <div class="headline">
+          <span class="kicker">E2E: Шаг C</span>
+          <h2 class="title medium">Контроль прогресса по конкретному студенту</h2>
+          <ul class="points">
+            <li>В разделе <strong>Студенты</strong> преподаватель открывает карточку успеваемости.</li>
+            <li>Видны пройденные тесты, средний балл, доля прохождения и динамика.</li>
+            <li>Есть фильтр по дисциплинам для точечного анализа проблем.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="19" type="button">Показать точки роста</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/14_teacher_student_performance_desktop.png" alt="Успеваемость отдельного студента" loading="lazy" />
+          <figcaption>Реальный скрин: успеваемость студента по дисциплинам</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="E2E: точки роста">
+        <div class="headline">
+          <span class="kicker">E2E: Шаг D</span>
+          <h2 class="title medium">Точки роста студента на основе ошибок</h2>
+          <ul class="points">
+            <li>После попыток студент открывает раздел <strong>Точки роста</strong>.</li>
+            <li>Сервис показывает темы, которые требуют повторения, и приоритеты по улучшению.</li>
+            <li>Преподаватель использует это для персональных рекомендаций и повторных тестов.</li>
+          </ul>
+          <div class="actions">
+            <button class="btn" data-go="20" type="button">Итог E2E</button>
+          </div>
+        </div>
+        <figure class="visual">
+          <img src="presentation_assets/desktop/15_student_growth_desktop.png" alt="Точки роста студента" loading="lazy" />
+          <figcaption>Реальный скрин: раздел «Точки роста» студента</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide cards" data-title="Итог E2E">
+        <div class="headline">
+          <span class="kicker">Финал</span>
+          <h2 class="title medium">Полный цикл подтвержден: от создания до роста результатов</h2>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Для преподавателя</h3>
+              <p>Быстрое создание теста (AI/вручную), публикация через QR и контроль результатов в одном рабочем потоке.</p>
+            </article>
+            <article class="card">
+              <h3>Для студента</h3>
+              <p>Понятный путь: пройти тест, увидеть балл, понять ошибки и получить персональные точки роста.</p>
+            </article>
+            <article class="card">
+              <h3>Для учебного процесса</h3>
+              <p>Прозрачная аналитика по группам и дисциплинам, чтобы принимать решения по корректировке лекций.</p>
+            </article>
+          </div>
+          <ul class="points">
+            <li><strong>Demo-стенд:</strong> преподаватель `prep1` (Линус Торвальд), студенты с корректными ФИО, реальные попытки в БД.</li>
+            <li><strong>Следующий шаг:</strong> запуск пилота на реальной группе и сбор метрик за модуль.</li>
+          </ul>
+          <div class="actions">
+            <a class="btn" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Открыть демо</a>
+            <button class="btn ghost" data-go="1" type="button">К первому слайду</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button id="prevBtn" class="btn ghost" type="button">Назад</button>
+      <div class="status">
+        <div id="counter" class="counter">1 / 20</div>
+        <div class="progress"><i id="progressBar"></i></div>
+        <div class="hint">Управление: кнопки, стрелки клавиатуры, клики по шагам</div>
+      </div>
+      <button id="nextBtn" class="btn" type="button">Вперёд</button>
+    </footer>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const jumpRow = document.getElementById('jumpRow');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const counter = document.getElementById('counter');
+    const progressBar = document.getElementById('progressBar');
+    const themeToggle = document.getElementById('themeToggle');
+
+    let current = 0;
+
+    const jumpButtons = slides.map((slide, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'jump-btn';
+      btn.textContent = `${idx + 1}. ${slide.dataset.title}`;
+      btn.addEventListener('click', () => showSlide(idx));
+      jumpRow.appendChild(btn);
+      return btn;
+    });
+
+    function showSlide(index) {
+      const safe = Math.max(0, Math.min(slides.length - 1, index));
+      current = safe;
+
+      slides.forEach((slide, idx) => {
+        slide.classList.toggle('active', idx === safe);
+      });
+
+      jumpButtons.forEach((btn, idx) => {
+        btn.classList.toggle('active', idx === safe);
+      });
+
+      prevBtn.disabled = safe === 0;
+      nextBtn.disabled = safe === slides.length - 1;
+      counter.textContent = `${safe + 1} / ${slides.length}`;
+      progressBar.style.width = `${((safe + 1) / slides.length) * 100}%`;
+
+      const activeBtn = jumpButtons[safe];
+      if (activeBtn) activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+
+    prevBtn.addEventListener('click', () => showSlide(current - 1));
+    nextBtn.addEventListener('click', () => showSlide(current + 1));
+
+    document.addEventListener('keydown', (e) => {
+      if (["ArrowRight", "PageDown", " "].includes(e.key)) {
+        e.preventDefault();
+        showSlide(current + 1);
+      }
+      if (["ArrowLeft", "PageUp"].includes(e.key)) {
+        e.preventDefault();
+        showSlide(current - 1);
+      }
+      if (e.key === 'Home') showSlide(0);
+      if (e.key === 'End') showSlide(slides.length - 1);
+    });
+
+    document.querySelectorAll('[data-go]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const target = Number(el.getAttribute('data-go'));
+        if (Number.isInteger(target)) showSlide(target - 1);
+      });
+    });
+
+    themeToggle.addEventListener('click', () => {
+      const isDark = document.body.dataset.theme === 'dark';
+      document.body.dataset.theme = isDark ? 'light' : 'dark';
+      themeToggle.textContent = isDark ? 'Тема: светлая' : 'Тема: тёмная';
+    });
+
+    let touchStartX = 0;
+    let touchEndX = 0;
+
+    document.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+      touchEndX = e.changedTouches[0].screenX;
+      const delta = touchStartX - touchEndX;
+      if (Math.abs(delta) < 45) return;
+      if (delta > 0) showSlide(current + 1);
+      else showSlide(current - 1);
+    }, { passive: true });
+
+    showSlide(0);
+  </script>
+</body>
+</html>

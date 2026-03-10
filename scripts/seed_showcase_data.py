@@ -45,7 +45,10 @@ def _clear_all(cur) -> None:
     cur.execute("DELETE FROM groups")
     cur.execute("DELETE FROM audit")
     cur.execute("DELETE FROM users")
-    cur.execute("DELETE FROM sqlite_sequence")
+    try:
+        cur.execute("DELETE FROM sqlite_sequence")
+    except Exception:
+        pass
 
 
 def _question_bank(lecture_title: str) -> list[dict]:

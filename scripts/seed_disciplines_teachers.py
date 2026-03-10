@@ -7,7 +7,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.db import connect, init_db
+from app.db import connect, init_db, insert_ignore
 from app.security import hash_password, new_salt
 
 DISCIPLINES = [
@@ -45,7 +45,7 @@ def seed() -> dict[str, int]:
     cur = conn.cursor()
 
     for name in DISCIPLINES:
-        cur.execute("INSERT OR IGNORE INTO disciplines (name) VALUES (?)", (name,))
+        insert_ignore(cur, "disciplines", ("name",), (name,), conflict_columns=("name",))
 
     cur.execute("SELECT id, name FROM disciplines")
     discipline_map = {row["name"]: int(row["id"]) for row in cur.fetchall()}
@@ -88,9 +88,12 @@ def seed() -> dict[str, int]:
 
         for name in picked_names:
             did = int(discipline_map[name])
-            cur.execute(
-                "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+            insert_ignore(
+                cur,
+                "teacher_disciplines",
+                ("teacher_id", "discipline_id"),
                 (teacher_id, did),
+                conflict_columns=("teacher_id", "discipline_id"),
             )
             assigned_links += 1
 

@@ -15,7 +15,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.db import connect, init_db
+from app.db import connect, init_db, insert_ignore
 from app.security import hash_password, new_salt
 
 
@@ -24,12 +24,14 @@ from app.security import hash_password, new_salt
 def _insert_user(cur, role, full_name, email, password, group=None, discipline_id=None):
     salt = new_salt()
     pw_hash = hash_password(password, salt)
-    cur.execute(
-        "INSERT OR IGNORE INTO users (role, full_name, email, password_hash, salt, student_group, discipline_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+    inserted = insert_ignore(
+        cur,
+        "users",
+        ("role", "full_name", "email", "password_hash", "salt", "student_group", "discipline_id"),
         (role, full_name, email.lower(), pw_hash, salt, group, discipline_id),
+        conflict_columns=("email",),
     )
-    if cur.lastrowid:
+    if inserted and cur.lastrowid:
         return cur.lastrowid
     cur.execute("SELECT id FROM users WHERE email = ?", (email.lower(),))
     return cur.fetchone()[0]
@@ -272,7 +274,7 @@ def _seed(force: bool = False):
     # Дисциплины
     disc_ids = {}
     for name in DISCIPLINE_NAMES:
-        cur.execute("INSERT OR IGNORE INTO disciplines (name) VALUES (?)", (name,))
+        insert_ignore(cur, "disciplines", ("name",), (name,), conflict_columns=("name",))
         cur.execute("SELECT id FROM disciplines WHERE name = ?", (name,))
         disc_ids[name] = cur.fetchone()[0]
 
@@ -284,15 +286,23 @@ def _seed(force: bool = False):
                            discipline_id=disc_ids[DISCIPLINE_NAMES[first_disc]])
         teacher_ids.append(tid)
         for di in TEACHER_DISC_MAP[i]:
-            cur.execute(
-                "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+            insert_ignore(
+                cur,
+                "teacher_disciplines",
+                ("teacher_id", "discipline_id"),
                 (tid, disc_ids[DISCIPLINE_NAMES[di]]),
+                conflict_columns=("teacher_id", "discipline_id"),
             )
 
     # Группы
     for group_name in ("ИВТ-301", "ИВТ-302"):
-        cur.execute("INSERT OR IGNORE INTO groups (name, teacher_id) VALUES (?, ?)",
-                    (group_name, teacher_ids[0]))
+        insert_ignore(
+            cur,
+            "groups",
+            ("name", "teacher_id"),
+            (group_name, teacher_ids[0]),
+            conflict_columns=("name",),
+        )
 
     # Студенты
     student_ids = []

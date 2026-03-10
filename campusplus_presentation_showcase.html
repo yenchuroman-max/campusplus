@@ -1,0 +1,1276 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>КампусПлюс — презентация дипломного проекта</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f6f0e8;
+      --bg2: #e8f0fb;
+      --panel: rgba(255, 251, 246, 0.82);
+      --panel2: rgba(255, 255, 255, 0.72);
+      --text: #142035;
+      --muted: #5d6b84;
+      --line: rgba(20, 32, 53, 0.12);
+      --brand: #d86b4b;
+      --brand2: #2f7c8f;
+      --gold: #f0b970;
+      --ok: #59bd96;
+      --screen: #eef3fb;
+      --shadow: 0 28px 80px rgba(40, 57, 89, 0.14);
+    }
+
+    body[data-theme="dark"] {
+      --bg: #071220;
+      --bg2: #0d213d;
+      --panel: rgba(10, 18, 33, 0.86);
+      --panel2: rgba(14, 25, 46, 0.78);
+      --text: #f2f6ff;
+      --muted: #a5b5d3;
+      --line: rgba(149, 178, 226, 0.18);
+      --brand: #ff9860;
+      --brand2: #67d5ef;
+      --gold: #ffd28c;
+      --ok: #5fc5a1;
+      --screen: #0c1a30;
+      --shadow: 0 36px 96px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+
+    body {
+      position: relative;
+      font-family: "Manrope", sans-serif;
+      color: var(--text);
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 12% 14%, rgba(216,107,75,.18), transparent 28%),
+        radial-gradient(circle at 88% 10%, rgba(47,124,143,.18), transparent 24%),
+        radial-gradient(circle at 50% 92%, rgba(240,185,112,.14), transparent 30%),
+        linear-gradient(135deg, var(--bg), var(--bg2));
+      transition: background .25s ease, color .25s ease;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: auto;
+      width: 38vw;
+      height: 38vw;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(48px);
+      opacity: .42;
+      z-index: 0;
+    }
+
+    body::before {
+      top: -14vw;
+      right: -16vw;
+      background: radial-gradient(circle, rgba(47,124,143,.22), transparent 68%);
+    }
+
+    body::after {
+      left: -16vw;
+      bottom: -18vw;
+      background: radial-gradient(circle, rgba(216,107,75,.16), transparent 68%);
+    }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      width: 1720px;
+      margin: 0;
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      border: 1px solid var(--line);
+      border-radius: 34px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+      box-shadow: var(--shadow), 0 1px 0 rgba(255,255,255,.22) inset;
+      backdrop-filter: blur(18px);
+      transform: translateX(-50%) scale(1);
+      transform-origin: top center;
+      will-change: transform;
+    }
+
+    .shell::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 160px;
+      background: linear-gradient(180deg, rgba(255,255,255,.13), transparent);
+      pointer-events: none;
+    }
+
+    .top {
+      display: grid;
+      grid-template-columns: minmax(420px,1.2fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 18px 22px 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(255,255,255,.14), rgba(255,255,255,.04));
+      box-shadow: 0 18px 36px rgba(57, 78, 118, 0.08);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 68px;
+      height: 68px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.52), rgba(255,255,255,.18));
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      flex: 0 0 auto;
+      box-shadow: 0 18px 40px rgba(45, 62, 96, 0.12);
+    }
+
+    .mark img { width: 44px; height: 44px; object-fit: contain; }
+
+    .brand-copy { min-width: 0; }
+
+    .meta-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .meta-strip span,
+    .helper-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.18);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(32px, 4vw, 60px);
+      letter-spacing: -.05em;
+      line-height: .96;
+    }
+
+    .brand p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: clamp(14px, 1vw, 17px);
+      line-height: 1.5;
+      max-width: 920px;
+    }
+
+    .top-actions {
+      display: grid;
+      gap: 12px;
+      justify-items: end;
+    }
+
+    .action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+
+    .helper-pill {
+      letter-spacing: .03em;
+      text-transform: none;
+      font-weight: 700;
+    }
+
+    .theme {
+      position: relative;
+      width: 154px;
+      height: 48px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,.14);
+      box-shadow: 0 16px 34px rgba(42, 60, 95, 0.10);
+      cursor: pointer;
+      overflow: hidden;
+    }
+
+    .theme span {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .theme span em {
+      width: 50%;
+      text-align: center;
+      font-style: normal;
+    }
+
+    .theme span em:first-child { color: #fff; }
+    .theme span em:last-child { color: var(--muted); }
+
+    body[data-theme="dark"] .theme span em:first-child { color: var(--muted); }
+    body[data-theme="dark"] .theme span em:last-child { color: #fff; }
+
+    .theme i {
+      z-index: 0;
+    }
+
+    .theme i {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      width: calc(50% - 9px);
+      height: 34px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 14px 24px rgba(47,124,143,.22);
+      transition: transform .22s ease, background .22s ease;
+    }
+
+    body[data-theme="dark"] .theme i {
+      transform: translateX(calc(100% + 6px));
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+    }
+
+    .btn, .ghost, .pill {
+      border: 1px solid transparent;
+      border-radius: 16px;
+      padding: 14px 18px;
+      font-size: 14px;
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+    }
+
+    .btn:hover, .ghost:hover, .pill:hover { transform: translateY(-1px); }
+
+    .btn {
+      color: #fff;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 18px 32px rgba(55, 98, 125, 0.22);
+    }
+
+    .btn:hover { box-shadow: 0 22px 38px rgba(55, 98, 125, 0.28); }
+
+    .ghost {
+      color: var(--text);
+      background: rgba(255,255,255,.22);
+      border-color: var(--line);
+      box-shadow: 0 12px 28px rgba(43, 61, 96, 0.08);
+    }
+
+    .ghost:hover {
+      border-color: rgba(47,124,143,.3);
+      box-shadow: 0 18px 34px rgba(43, 61, 96, 0.12);
+    }
+
+    .nav { display: none; }
+
+    .nav::-webkit-scrollbar { height: 8px; }
+    .nav::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(127,149,196,.46); }
+
+    .pill {
+      background: rgba(255,255,255,.16);
+      color: var(--muted);
+      border-color: var(--line);
+      white-space: nowrap;
+      padding: 12px 16px;
+      font-size: 13px;
+      box-shadow: 0 10px 26px rgba(39, 58, 92, 0.08);
+    }
+
+    .pill.active {
+      color: #fff;
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 18px 34px rgba(47, 124, 143, 0.22);
+    }
+
+    .deck { padding: 14px; min-height: auto; }
+
+    .slide {
+      display: none;
+      min-height: 690px;
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.12), transparent 32%),
+        radial-gradient(circle at right top, rgba(47,124,143,.10), transparent 24%),
+        radial-gradient(circle at left bottom, rgba(216,107,75,.10), transparent 26%),
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02)),
+        var(--panel);
+      padding: clamp(18px, 2vw, 30px);
+      gap: 24px;
+      animation: fade .32s ease;
+      box-shadow: 0 24px 56px rgba(47, 69, 106, 0.10);
+    }
+
+    .slide.active { display: grid; }
+    .cover, .split { grid-template-columns: minmax(320px,.95fr) minmax(420px,1.05fr); }
+    .full { grid-template-columns: 1fr; }
+
+    .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+    .eye {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    h2 {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: clamp(30px, 4.3vw, 68px);
+      line-height: .96;
+      letter-spacing: -.06em;
+    }
+
+    .m { font-size: clamp(28px, 3.2vw, 48px); }
+    .lead { margin: 0; color: var(--muted); font-size: clamp(16px,1.45vw,21px); line-height: 1.55; }
+
+    .metrics, .roles, .twos, .phones, .flow {
+      display: grid;
+      gap: 12px;
+    }
+
+    .metrics { grid-template-columns: repeat(3, minmax(120px,1fr)); }
+    .roles { grid-template-columns: repeat(3, minmax(180px,1fr)); }
+    .twos { grid-template-columns: repeat(2, minmax(220px,1fr)); }
+    .phones { grid-template-columns: repeat(4, minmax(160px,1fr)); }
+    .flow { grid-template-columns: repeat(5, minmax(120px,1fr)); }
+
+    .card, .step, .screen, .phone {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,.14);
+      box-shadow: 0 16px 36px rgba(48, 68, 106, 0.08);
+      transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+    }
+
+    .card:hover, .step:hover, .screen:hover, .phone:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 24px 48px rgba(48, 68, 106, 0.14);
+      border-color: rgba(133,153,212,.44);
+    }
+
+    .card { padding: 18px; }
+    .card h3 { margin: 0 0 10px; font-family: "Space Grotesk", sans-serif; font-size: 22px; line-height: 1.02; letter-spacing: -.04em; }
+    .card p, .card li { margin: 0; color: var(--muted); line-height: 1.46; font-size: 14px; }
+
+    .step { padding: 14px; display: flex; flex-direction: column; gap: 8px; min-height: 116px; }
+    .step b {
+      width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--brand), var(--brand2)); color: #fff; font-size: 15px; font-family: "Space Grotesk", sans-serif;
+    }
+    .step strong { font-size: 15px; }
+    .step span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+
+    .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .list li {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,.12);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+    .list strong { color: var(--text); }
+
+    .chips, .cta { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .screen {
+      position: relative;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.04)),
+        rgba(255,255,255,.10);
+    }
+
+    body[data-theme="dark"] .card,
+    body[data-theme="dark"] .step,
+    body[data-theme="dark"] .screen,
+    body[data-theme="dark"] .phone,
+    body[data-theme="dark"] .list li,
+    body[data-theme="dark"] .chip,
+    body[data-theme="dark"] .eye,
+    body[data-theme="dark"] .pill,
+    body[data-theme="dark"] .ghost {
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+    }
+
+    body[data-theme="dark"] .screen,
+    body[data-theme="dark"] .phone {
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.22);
+    }
+
+    body[data-theme="dark"] .url {
+      background: rgba(255,255,255,.06);
+    }
+
+    body[data-theme="dark"] .theme {
+      background: rgba(255,255,255,.06);
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 6px;
+    }
+
+    .dots { display: flex; gap: 6px; }
+    .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; background: #d6b0b5; }
+    .dots i:nth-child(2) { background: #e1c590; }
+    .dots i:nth-child(3) { background: #9bcba9; }
+
+    .url {
+      flex: 1;
+      min-width: 0;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.14);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .screen img {
+      width: 100%;
+      height: min(66vh, 760px);
+      object-fit: contain;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: var(--screen);
+      display: block;
+      cursor: zoom-in;
+      box-shadow: 0 18px 36px rgba(37, 56, 88, 0.10);
+    }
+
+    .screen::after,
+    .phone::after {
+      content: "Открыть в полном размере";
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 7px 11px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(8, 15, 29, 0.62);
+      color: rgba(255,255,255,.92);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity .18s ease, transform .18s ease;
+      pointer-events: none;
+    }
+
+    .screen:hover::after,
+    .phone:hover::after {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .screen figcaption, .phone span {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .phone { position: relative; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .phone img {
+      width: 100%;
+      height: min(56vh, 620px);
+      object-fit: contain;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--screen);
+      display: block;
+      cursor: zoom-in;
+      box-shadow: 0 16px 32px rgba(37, 56, 88, 0.10);
+    }
+
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      background: rgba(7, 18, 35, 0.82);
+      backdrop-filter: blur(18px);
+      z-index: 50;
+    }
+
+    .lightbox.open { display: flex; }
+
+    .lightbox-stage {
+      position: relative;
+      width: min(96vw, 1680px);
+      max-height: 92vh;
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 26px;
+      background: linear-gradient(180deg, rgba(14, 25, 46, 0.96), rgba(9, 17, 31, 0.98));
+      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.42);
+      display: grid;
+      gap: 14px;
+    }
+
+    .lightbox-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .lightbox-label {
+      color: rgba(238,243,255,.76);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .lightbox-close {
+      width: 46px;
+      height: 46px;
+      padding: 0;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      box-shadow: 0 16px 32px rgba(0,0,0,.18);
+    }
+
+    .lightbox-close:hover {
+      background: rgba(255,255,255,.14);
+      transform: translateY(-1px);
+    }
+
+    .lightbox img {
+      width: 100%;
+      max-height: calc(92vh - 140px);
+      object-fit: contain;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.1);
+      background: rgba(255,255,255,.02);
+      display: block;
+    }
+
+    .lightbox-caption {
+      color: rgba(238,243,255,.84);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: auto minmax(220px,1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 18px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .status { display: grid; gap: 8px; justify-items: center; }
+    .count { font-size: 14px; font-weight: 800; color: var(--muted); }
+    .prog {
+      width: min(620px, 100%);
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.34);
+      overflow: hidden;
+    }
+    .prog i {
+      display: block;
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--brand), var(--gold), var(--brand2));
+      transition: width .24s ease;
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1460px) {
+      .cover, .split { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: repeat(3, minmax(120px,1fr)); }
+      .phones { grid-template-columns: repeat(2, minmax(160px,1fr)); }
+    }
+
+    @media (max-width: 980px) {
+      .shell { width: 1280px; border-radius: 22px; }
+      .top { grid-template-columns: 1fr; padding: 16px; }
+      .top-actions { justify-items: start; }
+      .action-row { justify-content: flex-start; }
+      .theme { width: 100%; }
+      .deck { padding: 10px; min-height: auto; }
+      .slide { min-height: 760px; padding: 16px; }
+      h2 { font-size: clamp(24px, 8vw, 38px); }
+      .metrics, .roles, .twos, .phones, .flow { grid-template-columns: 1fr; }
+      .screen img { height: auto; max-height: 60vh; }
+      .footer { grid-template-columns: 1fr; justify-items: center; }
+      .prog { width: 100%; }
+      .lightbox { padding: 12px; }
+      .lightbox-stage { width: 100%; padding: 12px; border-radius: 18px; }
+      .lightbox img { max-height: calc(92vh - 120px); }
+    }
+  </style>
+</head>
+<body data-theme="light">
+  <div class="shell">
+    <header class="top">
+      <div class="brand">
+        <div class="mark"><img src="app/static/img/sgugit-mark.png" alt="СГУГиТ" /></div>
+        <div class="brand-copy">
+          <div class="meta-strip">
+            <span>СГУГиТ</span>
+            <span>Дипломный проект</span>
+            <span>Цифровизация учебного процесса</span>
+          </div>
+          <h1>КампусПлюс</h1>
+          <p>Платформа цифрового контроля знаний, генерации тестов и мониторинга успеваемости, разработанная в контексте образовательной среды СГУГиТ.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="helper-pill">Клик по скриншоту открывает его в полном размере</div>
+        <div class="action-row">
+          <button id="themeToggle" class="theme" type="button" aria-label="Переключить тему"><span><em>Светлая</em><em>Темная</em></span><i></i></button>
+          <a class="ghost" href="campusplus_presentation.html">Предыдущая версия</a>
+          <a class="btn" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Открыть демонстрационный стенд</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="deck">
+      <section class="slide cover active" data-title="Обложка">
+        <div class="col">
+          <span class="eye">СГУГиТ • Дипломный проект</span>
+          <h2>КампусПлюс формирует единый цифровой контур контроля знаний</h2>
+          <p class="lead">Это не просто сайт с тестами, а учебная платформа, в которой преподаватель создает дисциплины, загружает лекции, получает тесты по материалам, публикует их, выдает доступ по QR-коду и сразу видит картину по группе и каждому студенту. Проект ориентирован на реальную образовательную среду СГУГиТ и может использоваться как прикладной инструмент учебного мониторинга.</p>
+          <div class="metrics">
+            <div class="card"><h3>3 роли</h3><p>Преподаватель, студент и администратор работают в одном сервисе.</p></div>
+            <div class="card"><h3>AI + ручной режим</h3><p>Есть генерация тестов и ручной конструктор для точной настройки.</p></div>
+            <div class="card"><h3>Аналитика</h3><p>Средний балл, попытки, дисциплины, история и точки роста.</p></div>
+          </div>
+          <div class="cta">
+            <button class="btn" data-go="7" type="button">Сценарий преподавателя</button>
+            <button class="ghost" data-go="14" type="button">Сценарий студента</button>
+            <button class="ghost" data-go="17" type="button">Мобильная версия</button>
+          </div>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">https://campusplus.onrender.com/</div></div>
+          <img src="presentation_assets/desktop/01_home_desktop.png" alt="Главная страница КампусПлюс" loading="lazy" />
+          <figcaption>Реальный экран проекта: главная страница КампусПлюс</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Проблема">
+        <div class="col">
+          <span class="eye">Актуальность для СГУГиТ</span>
+          <h2 class="m">Преподаватели тратят значительное время на ручную подготовку и анализ контроля знаний</h2>
+          <ul class="list">
+            <li><strong>Ручная подготовка.</strong> Вопросы, проверка и анализ результатов часто собираются в разных местах.</li>
+            <li><strong>Разрыв между лекцией и тестом.</strong> Учебный материал не связан с инструментом контроля напрямую.</li>
+            <li><strong>Слабая прозрачность.</strong> Студент не всегда понимает свои пробелы, а преподаватель не видит срез по группе мгновенно.</li>
+            <li><strong>Рост нагрузки.</strong> Чем больше дисциплин и потоков, тем дороже ручная рутина.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="twos">
+            <article class="card"><h3>Почему это актуально</h3><p>Вузам нужен не просто цифровой журнал, а инструмент, который непосредственно помогает управлять качеством освоения дисциплины.</p></article>
+            <article class="card"><h3>Главный эффект</h3><p>Экономия времени преподавателя и более прозрачный контроль успеваемости для всех ролей.</p></article>
+            <article class="card"><h3>До КампусПлюс</h3><p>Лекции отдельно, тесты отдельно, аналитика отдельно. Контроль знаний масштабируется тяжело.</p></article>
+            <article class="card"><h3>После КампусПлюс</h3><p>Один сервис для контента, тестирования, публикации, попыток и предметной аналитики.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Суть проекта">
+        <div class="col">
+          <span class="eye">Что за проект</span>
+          <h2 class="m">КампусПлюс — платформа мониторинга успеваемости, а не просто конструктор тестов</h2>
+          <p class="lead">Проект объединяет преподавателя, студента и администратора в одном веб-сервисе. Преподаватель создает дисциплины, загружает лекции, получает тесты на основе материалов, проводит контроль знаний и отслеживает прогресс. Студент проходит тесты, видит историю и рекомендации. Администратор поддерживает структуру доступа.</p>
+          <div class="chips">
+            <span class="chip">Дисциплины</span>
+            <span class="chip">Лекции</span>
+            <span class="chip">AI-генерация</span>
+            <span class="chip">Ручной тест</span>
+            <span class="chip">QR-доступ</span>
+            <span class="chip">Аналитика</span>
+          </div>
+        </div>
+        <div class="col">
+          <div class="roles">
+            <article class="card"><h3>Преподаватель</h3><p>Создает контент, собирает тесты, публикует их и управляет аналитикой.</p></article>
+            <article class="card"><h3>Студент</h3><p>Проходит тесты, видит баллы, историю попыток и персональные точки роста.</p></article>
+            <article class="card"><h3>Администратор</h3><p>Управляет ролями, группами, дисциплинами и организационным контуром платформы.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Стек">
+        <div class="col">
+          <span class="eye">Технологическая реализация</span>
+          <h2 class="m">Проект написан как прикладной веб-сервис с понятной серверной архитектурой</h2>
+          <ul class="list">
+            <li><strong>Backend:</strong> FastAPI на Python, основная логика и маршрутизация расположены в <code>main.py</code>.</li>
+            <li><strong>Frontend:</strong> HTML, CSS и Jinja2 для серверного рендеринга и быстрого MVP.</li>
+            <li><strong>База данных:</strong> SQLite в текущем контуре, с возможностью работать через адаптер и с PostgreSQL.</li>
+            <li><strong>Авторизация:</strong> сессии через <code>SessionMiddleware</code> и разграничение прав по ролям.</li>
+            <li><strong>AI-модуль:</strong> логика генерации и нормализации вопросов находится в <code>app/ai.py</code>.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="twos">
+            <article class="card"><h3>Почему этот стек подходит</h3><p>Он позволяет быстро разрабатывать образовательный сервис, не жертвуя читаемостью кода и контролем бизнес-логики.</p></article>
+            <article class="card"><h3>Что это дает</h3><p>Сервис легко развернуть локально, показать комиссии и постепенно дорастить до полноценного прод-стенда.</p></article>
+            <article class="card"><h3>Что хранится в БД</h3><p>Пользователи, группы, дисциплины, лекции, тесты, вопросы, попытки и ответы по вопросам.</p></article>
+            <article class="card"><h3>Потенциал развития</h3><p>Архитектура уже отделяет AI, данные, роли и интерфейс, поэтому проект можно масштабировать без переписывания с нуля.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Модуль генерации">
+        <div class="col">
+          <span class="eye">Генерация тестов</span>
+          <h2 class="m">КампусПлюс опирается не на абстрактную идею AI, а на надежную прикладную механику генерации</h2>
+          <ul class="list">
+            <li><strong>Вход:</strong> преподаватель загружает текст лекции и задает число вопросов и сложность.</li>
+            <li><strong>AI-цепочка:</strong> сначала Gemini, затем OpenAI, затем локальный fallback-алгоритм.</li>
+            <li><strong>Формат ответа:</strong> строгий JSON с <code>text</code>, <code>options</code> и <code>correct_index</code>.</li>
+            <li><strong>Нормализация:</strong> система валидирует структуру, число вопросов и корректность индекса ответа.</li>
+            <li><strong>Практический смысл:</strong> даже при сбое внешнего AI сервис не ломается и может дособрать тест локальной логикой.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="flow">
+            <div class="step"><b>1</b><strong>Лекция</strong><span>Материал становится базой для будущего контроля.</span></div>
+            <div class="step"><b>2</b><strong>Тезисы</strong><span>Из текста извлекаются смысловые опоры и профиль дисциплины.</span></div>
+            <div class="step"><b>3</b><strong>AI</strong><span>Провайдеру передается строгий запрос на тестовые вопросы.</span></div>
+            <div class="step"><b>4</b><strong>Проверка</strong><span>Структура и качество вопросов проверяются автоматически.</span></div>
+            <div class="step"><b>5</b><strong>Черновик</strong><span>Результат сохраняется для редактора и публикации.</span></div>
+          </div>
+          <div class="card"><h3>Главная идея</h3><p>Проект не обучает собственную модель с нуля. Он использует внешние генеративные модели и собственную прикладную логику подготовки, проверки и доведения теста до рабочего состояния.</p></div>
+        </div>
+      </section>
+
+      <section class="slide full" data-title="Роли">
+        <div class="col">
+          <span class="eye">Роли и сценарии</span>
+          <h2 class="m">У каждой роли свой пользовательский маршрут, а не общий перегруженный интерфейс</h2>
+          <div class="roles">
+            <article class="card"><h3>Сценарий преподавателя</h3><p>Преподаватель создает дисциплины, лекции, тесты, публикует их и анализирует результаты по группе и студентам.</p></article>
+            <article class="card"><h3>Сценарий студента</h3><p>Студент видит только свои дисциплины и тесты, проходит попытки и получает понятную обратную связь.</p></article>
+            <article class="card"><h3>Сценарий администратора</h3><p>Администратор отвечает за роли, группы, структуру данных и организационный порядок в системе.</p></article>
+          </div>
+          <div class="cta">
+            <button class="btn" data-go="7" type="button">Сквозной сценарий преподавателя</button>
+            <button class="ghost" data-go="14" type="button">Сценарий студента</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide full" data-title="Маршрут преподавателя">
+        <div class="col">
+          <span class="eye">Преподаватель: сквозной сценарий</span>
+          <h2 class="m">Полный путь преподавателя от лекции до управленческого решения</h2>
+          <div class="flow">
+            <div class="step"><b>1</b><strong>Вход</strong><span>Преподаватель попадает в свою рабочую панель.</span></div>
+            <div class="step"><b>2</b><strong>Дисциплина</strong><span>Создает или подключает дисциплину под курс.</span></div>
+            <div class="step"><b>3</b><strong>Лекция</strong><span>Загружает текст, файл или готовый материал.</span></div>
+            <div class="step"><b>4</b><strong>Тест</strong><span>Генерирует вопросы AI или собирает их вручную.</span></div>
+            <div class="step"><b>5</b><strong>Публикация</strong><span>Проверяет, редактирует и открывает доступ студентам.</span></div>
+          </div>
+          <div class="flow">
+            <div class="step"><b>6</b><strong>QR</strong><span>Запускает тест на паре через QR-код.</span></div>
+            <div class="step"><b>7</b><strong>Попытки</strong><span>Система получает реальные результаты студентов.</span></div>
+            <div class="step"><b>8</b><strong>Аналитика</strong><span>Показывает средний балл, группы и динамику.</span></div>
+            <div class="step"><b>9</b><strong>Студент</strong><span>Открывается карточка конкретного обучающегося.</span></div>
+            <div class="step"><b>10</b><strong>Коррекция</strong><span>На основе данных преподаватель меняет лекции и контроль.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Панель преподавателя">
+        <div class="col">
+          <span class="eye">Шаг 1</span>
+          <h2 class="m">После входа преподаватель сразу попадает в рабочее пространство</h2>
+          <ul class="list">
+            <li><strong>Собранный контур.</strong> Дисциплины, студенты, тесты и аналитика доступны в одной панели.</li>
+            <li><strong>Минимум лишнего.</strong> Интерфейс показывает только те действия, которые необходимы преподавателю в учебной работе.</li>
+            <li><strong>Экономия времени.</strong> Не нужно переключаться между разными сервисами ради одного занятия.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/dashboard</div></div>
+          <img src="presentation_assets/desktop/04_teacher_panel_desktop.png" alt="Панель преподавателя" loading="lazy" />
+          <figcaption>Реальный экран: вход преподавателя в КампусПлюс</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Дисциплины и лекции">
+        <div class="col">
+          <span class="eye">Шаг 2</span>
+          <h2 class="m">Работа начинается с дисциплины и лекционного материала</h2>
+          <ul class="list">
+            <li><strong>Дисциплина</strong> задает смысловую рамку и будущую аналитику по предмету.</li>
+            <li><strong>Лекция</strong> становится не архивом, а прямым источником для генерации теста.</li>
+            <li><strong>Содержательная связь</strong> между материалом и контролем делает тестирование педагогически осмысленным.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/teacher/lectures</div></div>
+          <img src="presentation_assets/desktop/05_teacher_lectures_desktop.png" alt="Лекции и дисциплины" loading="lazy" />
+          <figcaption>Реальный экран: дисциплины, лекции и связанные тесты преподавателя</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Ручной тест">
+        <div class="col">
+          <span class="eye">Шаг 3A</span>
+          <h2 class="m">Если нужна точность, преподаватель использует ручной конструктор</h2>
+          <ul class="list">
+            <li><strong>Ручной контроль.</strong> Можно самому задать вопрос, 4 варианта ответа и правильный индекс.</li>
+            <li><strong>Гибкость.</strong> AI и ручной подход могут использоваться вместе в одном сценарии.</li>
+            <li><strong>Практическая польза.</strong> Продукт остается ценным даже для преподавателей, которые не хотят полностью полагаться на генерацию.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/teacher/tests/manual/new</div></div>
+          <img src="presentation_assets/desktop/16_teacher_manual_test_form_desktop.png" alt="Ручной конструктор теста" loading="lazy" />
+          <figcaption>Реальный экран: ручной конструктор теста</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Редактирование и публикация">
+        <div class="col">
+          <span class="eye">Шаг 3B</span>
+          <h2 class="m">Тест проходит через редактор, а публикация отделена от черновика</h2>
+          <ul class="list">
+            <li><strong>Режим черновика.</strong> Сначала тест сохраняется как черновик и не уходит студентам без проверки.</li>
+            <li><strong>Редактор.</strong> Преподаватель меняет текст вопроса, варианты и правильный ответ.</li>
+            <li><strong>Публикация.</strong> Только после контроля качества тест становится доступен для прохождения.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/teacher/tests/{id}/edit</div></div>
+          <img src="presentation_assets/desktop/06_teacher_tests_desktop.png" alt="Редактирование теста" loading="lazy" />
+          <figcaption>Реальный экран: редактор теста, сохранение и публикация</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="QR и запуск">
+        <div class="col">
+          <span class="eye">Шаг 4</span>
+          <h2 class="m">На занятии тест можно выдать группе через QR-код без ручной рассылки ссылок</h2>
+          <ul class="list">
+            <li><strong>Сценарий пары.</strong> Преподаватель открывает QR, студенты заходят в тест с телефона.</li>
+            <li><strong>Быстрый вход.</strong> Неавторизованный студент проходит через вход или регистрацию и возвращается в тест.</li>
+            <li><strong>Практический плюс.</strong> Контроль запускается за минуты и не требует отдельной LMS-логистики.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/teacher/tests/{id}/qr</div></div>
+          <img src="presentation_assets/desktop/07_teacher_qr_desktop.png" alt="QR-код для теста" loading="lazy" />
+          <figcaption>Реальный экран: QR-доступ к опубликованному тесту</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Аналитика группы">
+        <div class="col">
+          <span class="eye">Шаг 5</span>
+          <h2 class="m">КампусПлюс сразу превращает ответы студентов в понятную групповую аналитику</h2>
+          <ul class="list">
+            <li><strong>Средний балл.</strong> Видно общий уровень по дисциплине и текущую динамику.</li>
+            <li><strong>Срез по группам.</strong> Можно быстро сравнивать академические группы между собой.</li>
+            <li><strong>Срез по студентам.</strong> Преподаватель получает таблицу попыток и средних баллов.</li>
+            <li><strong>Польза.</strong> Решения по повторению материала строятся на данных, а не на предположениях.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/v2/teacher/analytics</div></div>
+          <img src="presentation_assets/desktop/10_student_analytics_desktop.png" alt="Аналитика преподавателя" loading="lazy" />
+          <figcaption>Реальный экран: средний балл, попытки и мониторинг по группам</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Карточка студента">
+        <div class="col">
+          <span class="eye">Шаг 6</span>
+          <h2 class="m">Если нужна детализация, преподаватель открывает карточку конкретного студента</h2>
+          <ul class="list">
+            <li><strong>Фильтр по дисциплинам.</strong> Анализ не смешивает все попытки в один нечитабельный список.</li>
+            <li><strong>Статус по тестам.</strong> Видно, что пройдено, а где нужна доработка.</li>
+            <li><strong>История.</strong> Система показывает не только итог, но и динамику по последним попыткам.</li>
+          </ul>
+          <p class="lead">На демонстрационном стенде преподаватель <code>prep1</code> переименован в Линус Торвальд, а аналитика собрана на реальных тестах и попытках.</p>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/v2/teacher/students/{id}/performance</div></div>
+          <img src="presentation_assets/desktop/14_teacher_student_performance_desktop.png" alt="Успеваемость студента" loading="lazy" />
+          <figcaption>Реальный экран: успеваемость одного студента по тестам и дисциплинам</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Студент: кабинет">
+        <div class="col">
+          <span class="eye">Студент</span>
+          <h2 class="m">Студент видит не перегруженную админку, а понятный учебный маршрут</h2>
+          <ul class="list">
+            <li><strong>Только релевантное.</strong> Дисциплины, доступные тесты, история и личный прогресс.</li>
+            <li><strong>Простота входа.</strong> Кабинет сразу показывает, где учиться и что проходить.</li>
+            <li><strong>Прозрачность.</strong> У студента появляется связь между тестом, результатом и предметом.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/dashboard</div></div>
+          <img src="presentation_assets/desktop/08_student_dashboard_desktop.png" alt="Кабинет студента" loading="lazy" />
+          <figcaption>Реальный экран: кабинет студента с дисциплинами и историей тестирований</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide split" data-title="Студент: тесты и рост">
+        <div class="col">
+          <span class="eye">Студент</span>
+          <h2 class="m">Система оценивает не только факт прохождения, но и показывает, куда студенту расти дальше</h2>
+          <ul class="list">
+            <li><strong>Тесты.</strong> Студент проходит опубликованные тесты по своим дисциплинам в веб-интерфейсе.</li>
+            <li><strong>История.</strong> Результаты сохраняются и попадают в аналитику.</li>
+            <li><strong>Точки роста.</strong> На основе ошибок система выделяет слабые темы и направления для повторения.</li>
+          </ul>
+        </div>
+        <div class="col">
+          <figure class="screen">
+            <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/student/tests</div></div>
+            <img src="presentation_assets/desktop/09_student_tests_desktop.png" alt="Тесты студента" loading="lazy" />
+            <figcaption>Реальный экран: дисциплины и тесты студента</figcaption>
+          </figure>
+          <figure class="screen">
+            <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/growth</div></div>
+            <img src="presentation_assets/desktop/15_student_growth_desktop.png" alt="Точки роста студента" loading="lazy" />
+            <figcaption>Реальный экран: точки роста на основе ошибок и попыток</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Админка">
+        <div class="col">
+          <span class="eye">Администратор</span>
+          <h2 class="m">Администратор поддерживает организационный порядок и целостность учебного процесса</h2>
+          <ul class="list">
+            <li><strong>Группы и привязки.</strong> Кто к какому преподавателю относится и по каким дисциплинам работает.</li>
+            <li><strong>Роли и доступ.</strong> Студенты, преподаватели и админы получают только свои права.</li>
+            <li><strong>Системная устойчивость.</strong> При росте числа пользователей платформа остается управляемой.</li>
+          </ul>
+        </div>
+        <figure class="screen">
+          <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="url">/admin/groups</div></div>
+          <img src="presentation_assets/desktop/12_admin_groups_desktop.png" alt="Управление группами" loading="lazy" />
+          <figcaption>Реальный экран: управление группами и организационной структурой</figcaption>
+        </figure>
+      </section>
+
+      <section class="slide full" data-title="Мобильная версия">
+        <div class="col">
+          <span class="eye">Мобильная версия</span>
+          <h2 class="m">Мобильный сценарий является важной частью сервиса: он обеспечивает QR-вход и быстрое прохождение тестов на занятии</h2>
+          <div class="phones">
+            <div class="phone"><img src="mobile_screens/01_home_mobile.png" alt="Мобильная главная" loading="lazy" /><span>Главная страница</span></div>
+            <div class="phone"><img src="mobile_screens/03_login_mobile.png" alt="Мобильный вход" loading="lazy" /><span>Вход</span></div>
+            <div class="phone"><img src="mobile_screens/10_student_dashboard_mobile.png" alt="Мобильный кабинет" loading="lazy" /><span>Кабинет студента</span></div>
+            <div class="phone"><img src="mobile_screens/11_student_tests_mobile.png" alt="Мобильные тесты" loading="lazy" /><span>Прохождение тестов</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide full" data-title="Практическая значимость">
+        <div class="col">
+          <span class="eye">Практическая значимость для СГУГиТ</span>
+          <h2 class="m">Почему такой сервис целесообразно не только защищать, но и внедрять в учебный процесс</h2>
+          <div class="twos">
+            <article class="card"><h3>Для преподавателя</h3><p>Экономия времени на подготовке контроля знаний, единый рабочий контур и мгновенная аналитика по группе и студентам.</p></article>
+            <article class="card"><h3>Для студента</h3><p>Понятный цифровой путь: тест, балл, история, дисциплины и точки роста без лишней перегрузки интерфейсом.</p></article>
+            <article class="card"><h3>Для вуза</h3><p>Цифровизация учебного процесса без тяжелой инфраструктуры и прозрачный мониторинг освоения дисциплин.</p></article>
+            <article class="card"><h3>Для внедрения</h3><p>КампусПлюс уже демонстрирует рабочий сквозной сценарий, а не только макет: роли, данные, тесты, аналитика и мобильный пользовательский маршрут уже существуют.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide split" data-title="Финал">
+        <div class="col">
+          <span class="eye">Краткий вывод</span>
+          <h2 class="m">КампусПлюс решает актуальную практическую проблему преподавателя и делает контроль знаний быстрым, прозрачным и масштабируемым</h2>
+          <p class="lead">Проект объединяет лекционный контент, генерацию тестов, ручной конструктор, QR-доступ, аналитику и административный контур в одном продукте. В этом его ключевая сила: он помогает не просто “оцифровать форму”, а улучшить сам процесс учебного контроля.</p>
+          <div class="chips">
+            <span class="chip">FastAPI</span>
+            <span class="chip">Jinja2</span>
+            <span class="chip">SQLite / PostgreSQL</span>
+            <span class="chip">Gemini + OpenAI + fallback</span>
+            <span class="chip">Преподаватель / Студент / Администратор</span>
+          </div>
+          <div class="cta">
+            <a class="btn" href="https://campusplus.onrender.com/" target="_blank" rel="noopener">Открыть КампусПлюс</a>
+            <button class="ghost" data-go="1" type="button">К первому слайду</button>
+          </div>
+        </div>
+        <div class="col">
+          <div class="twos">
+            <article class="card"><h3>Что уже готово</h3><p>Рабочие роли, дисциплины, лекции, AI-генерация, ручные тесты, публикация, QR, аналитика и точки роста.</p></article>
+            <article class="card"><h3>Что можно развивать</h3><p>Промышленная БД, интеграции с вузовской инфраструктурой, расширенные отчеты и новые контуры доступа.</p></article>
+            <article class="card"><h3>Почему это востребовано</h3><p>Потому что продукт решает понятную практическую проблему и показывает измеримый эффект в ежедневной работе преподавателя.</p></article>
+            <article class="card"><h3>Демо-стенд</h3><p>В проекте уже есть реальные тесты, данные, студенты и наглядные скриншоты живого рабочего процесса.</p></article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button id="prevBtn" class="ghost" type="button">Предыдущий слайд</button>
+      <div class="status">
+        <div id="count" class="count">1 / 20</div>
+        <div class="prog"><i id="progBar"></i></div>
+        <div class="hint">Навигация: кнопки, клавиши со стрелками, горизонтальные свайпы и F11 для полноэкранного показа</div>
+      </div>
+      <button id="nextBtn" class="btn" type="button">Следующий слайд</button>
+    </footer>
+  </div>
+
+  <div id="lightbox" class="lightbox" aria-hidden="true">
+    <div class="lightbox-stage" role="dialog" aria-modal="true" aria-label="Полноэкранный просмотр изображения">
+      <div class="lightbox-top">
+        <div class="lightbox-label">Полноэкранный просмотр</div>
+        <button id="lightboxClose" class="lightbox-close" type="button" aria-label="Закрыть">×</button>
+      </div>
+      <img id="lightboxImage" src="" alt="" />
+      <div id="lightboxCaption" class="lightbox-caption"></div>
+    </div>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const count = document.getElementById("count");
+    const progBar = document.getElementById("progBar");
+    const themeToggle = document.getElementById("themeToggle");
+    const shell = document.querySelector(".shell");
+    const lightbox = document.getElementById("lightbox");
+    const lightboxImage = document.getElementById("lightboxImage");
+    const lightboxCaption = document.getElementById("lightboxCaption");
+    const lightboxClose = document.getElementById("lightboxClose");
+    const themeKey = "campusplus-showcase-theme";
+    let current = 0;
+
+    function applyTheme(theme, save = true) {
+      document.body.dataset.theme = theme === "dark" ? "dark" : "light";
+      if (save) {
+        try { localStorage.setItem(themeKey, document.body.dataset.theme); } catch (e) {}
+      }
+      requestAnimationFrame(fitPresentation);
+    }
+
+    function fitPresentation() {
+      shell.style.transform = "translateX(-50%) scale(1)";
+      const shellWidth = shell.offsetWidth;
+      const shellHeight = shell.scrollHeight;
+      const availableWidth = window.innerWidth - 24;
+      const availableHeight = window.innerHeight - 24;
+      const scale = Math.min(availableWidth / shellWidth, availableHeight / shellHeight, 1);
+      shell.style.transform = `translateX(-50%) scale(${scale})`;
+    }
+
+    function show(index) {
+      const safe = Math.max(0, Math.min(slides.length - 1, index));
+      current = safe;
+      slides.forEach((slide, idx) => slide.classList.toggle("active", idx === safe));
+      count.textContent = `${safe + 1} / ${slides.length}`;
+      progBar.style.width = `${((safe + 1) / slides.length) * 100}%`;
+      prevBtn.disabled = safe === 0;
+      nextBtn.disabled = safe === slides.length - 1;
+      requestAnimationFrame(fitPresentation);
+    }
+
+    prevBtn.addEventListener("click", () => show(current - 1));
+    nextBtn.addEventListener("click", () => show(current + 1));
+
+    document.querySelectorAll("[data-go]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const target = Number(el.getAttribute("data-go"));
+        if (Number.isInteger(target)) show(target - 1);
+      });
+    });
+
+    function getImageCaption(img) {
+      const figure = img.closest("figure");
+      if (figure) {
+        const caption = figure.querySelector("figcaption");
+        if (caption) return caption.textContent.trim();
+      }
+      const phone = img.closest(".phone");
+      if (phone) {
+        const caption = phone.querySelector("span");
+        if (caption) return caption.textContent.trim();
+      }
+      return img.alt || "";
+    }
+
+    function openLightbox(img) {
+      lightboxImage.src = img.currentSrc || img.src;
+      lightboxImage.alt = img.alt || "";
+      lightboxCaption.textContent = getImageCaption(img);
+      lightbox.classList.add("open");
+      lightbox.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeLightbox() {
+      lightbox.classList.remove("open");
+      lightbox.setAttribute("aria-hidden", "true");
+      lightboxImage.src = "";
+      document.body.style.overflow = "";
+    }
+
+    document.querySelectorAll(".screen img, .phone img").forEach((img) => {
+      img.addEventListener("click", () => openLightbox(img));
+    });
+
+    lightboxClose.addEventListener("click", closeLightbox);
+    lightbox.addEventListener("click", (event) => {
+      if (event.target === lightbox) closeLightbox();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (lightbox.classList.contains("open")) {
+        if (event.key === "Escape") closeLightbox();
+        return;
+      }
+      if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        show(current + 1);
+      }
+      if (["ArrowLeft", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        show(current - 1);
+      }
+      if (event.key === "Home") show(0);
+      if (event.key === "End") show(slides.length - 1);
+      if (event.key === "F11") setTimeout(fitPresentation, 320);
+    });
+
+    let touchStartX = 0;
+    let touchEndX = 0;
+    document.addEventListener("touchstart", (event) => {
+      touchStartX = event.changedTouches[0].screenX;
+    }, { passive: true });
+    document.addEventListener("touchend", (event) => {
+      touchEndX = event.changedTouches[0].screenX;
+      const delta = touchStartX - touchEndX;
+      if (Math.abs(delta) < 48) return;
+      if (delta > 0) show(current + 1);
+      else show(current - 1);
+    }, { passive: true });
+
+    let themeDragStart = null;
+    themeToggle.addEventListener("pointerdown", (event) => {
+      themeDragStart = event.clientX;
+    });
+    themeToggle.addEventListener("pointerup", (event) => {
+      if (themeDragStart === null) return;
+      const delta = event.clientX - themeDragStart;
+      if (Math.abs(delta) < 10) {
+        applyTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
+      } else if (delta > 0) {
+        applyTheme("dark");
+      } else {
+        applyTheme("light");
+      }
+      themeDragStart = null;
+    });
+
+    try {
+      const saved = localStorage.getItem(themeKey);
+      if (saved === "light" || saved === "dark") applyTheme(saved, false);
+    } catch (e) {}
+
+    window.addEventListener("resize", fitPresentation);
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(fitPresentation).catch(() => {});
+    }
+
+    show(0);
+  </script>
+</body>
+</html>

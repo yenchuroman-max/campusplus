@@ -32,6 +32,32 @@ def _rewrite_placeholders(query: str) -> str:
     return query.replace("?", "%s")
 
 
+def insert_ignore(
+    cur,
+    table: str,
+    columns: tuple[str, ...] | list[str],
+    values: tuple[Any, ...] | list[Any],
+    conflict_columns: tuple[str, ...] | list[str] | None = None,
+) -> int:
+    """Run an INSERT that ignores duplicate-key conflicts on both SQLite and PostgreSQL."""
+    column_list = tuple(columns)
+    placeholders = ", ".join("?" for _ in column_list)
+    columns_sql = ", ".join(column_list)
+    base_sql = f"INSERT INTO {table} ({columns_sql}) VALUES ({placeholders})"
+
+    if _use_postgres():
+        if conflict_columns:
+            conflict_sql = ", ".join(conflict_columns)
+            sql = f"{base_sql} ON CONFLICT ({conflict_sql}) DO NOTHING"
+        else:
+            sql = f"{base_sql} ON CONFLICT DO NOTHING"
+    else:
+        sql = f"INSERT OR IGNORE INTO {table} ({columns_sql}) VALUES ({placeholders})"
+
+    cur.execute(sql, tuple(values))
+    return int(getattr(cur, "rowcount", 0) or 0)
+
+
 class DictLikeRow(dict):
     """Row object with both dict and index access (sqlite3.Row-like)."""
 

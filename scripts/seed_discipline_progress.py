@@ -10,7 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.db import connect, init_db
+from app.db import connect, init_db, insert_ignore
 from app.security import hash_password, new_salt
 from scripts.seed_disciplines_teachers import seed as seed_teachers
 
@@ -169,9 +169,12 @@ def _question_bank(topic: str) -> list[dict]:
 
 def _ensure_students(cur, teacher_id: int, group_names: list[str]) -> list[int]:
     for group_name in group_names:
-        cur.execute(
-            "INSERT OR IGNORE INTO groups (name, teacher_id) VALUES (?, ?)",
+        insert_ignore(
+            cur,
+            "groups",
+            ("name", "teacher_id"),
             (group_name, teacher_id),
+            conflict_columns=("name",),
         )
 
     cur.execute(

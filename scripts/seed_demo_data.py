@@ -50,7 +50,10 @@ def _clear_all(cur) -> None:
     cur.execute("DELETE FROM tests")
     cur.execute("DELETE FROM lectures")
     cur.execute("DELETE FROM users")
-    cur.execute("DELETE FROM sqlite_sequence")
+    try:
+        cur.execute("DELETE FROM sqlite_sequence")
+    except Exception:
+        pass
 
 
 def _seed(force: bool = False) -> dict:
