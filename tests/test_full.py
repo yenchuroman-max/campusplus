@@ -130,6 +130,30 @@ def _create_group(db, name="БИ-41", teacher_id=None):
     db.commit()
 
 
+def _get_first_discipline_id(db) -> int:
+    cur = db.cursor()
+    cur.execute("SELECT id FROM disciplines ORDER BY id LIMIT 1")
+    row = cur.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _link_teacher_discipline_group(db, teacher_id: int, group_name: str = "", discipline_id: int | None = None):
+    cur = db.cursor()
+    resolved_discipline_id = int(discipline_id or _get_first_discipline_id(db))
+    normalized_group = (group_name or "").strip()
+    cur.execute(
+        "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+        (teacher_id, resolved_discipline_id),
+    )
+    cur.execute(
+        "INSERT OR IGNORE INTO teaching_assignments (teacher_id, discipline_id, group_name) VALUES (?, ?, ?)",
+        (teacher_id, resolved_discipline_id, normalized_group),
+    )
+    db.commit()
+    return resolved_discipline_id
+
+
 def _insert_user(
     db,
     role: str,
@@ -156,10 +180,15 @@ def _insert_user(
 
 
 def _insert_lecture(db, teacher_id, title="Тестовая лекция", body="x" * 100, discipline_id=None):
+    resolved_discipline_id = int(discipline_id or _get_first_discipline_id(db))
     cur = db.cursor()
     cur.execute(
+        "INSERT OR IGNORE INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
+        (teacher_id, resolved_discipline_id),
+    )
+    cur.execute(
         "INSERT INTO lectures (teacher_id, title, body, created_at, discipline_id) VALUES (?, ?, ?, ?, ?)",
-        (teacher_id, title, body, datetime.utcnow().isoformat(), discipline_id),
+        (teacher_id, title, body, datetime.utcnow().isoformat(), resolved_discipline_id),
     )
     db.commit()
     return cur.lastrowid
@@ -196,7 +225,7 @@ class TestDatabase:
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = {row[0] for row in cur.fetchall()}
         expected = {"users", "lectures", "tests", "questions", "attempts", "answers",
-                    "groups", "disciplines", "teacher_disciplines", "audit"}
+                    "groups", "disciplines", "teacher_disciplines", "teaching_assignments", "audit"}
         assert expected.issubset(tables), f"Не хватает таблиц: {expected - tables}"
 
     def test_default_disciplines_seeded(self, db):
@@ -668,6 +697,7 @@ class TestTeacherFlow:
 
     def test_teacher_can_reset_assigned_student_password(self, client, db):
         teacher_id = self._setup_teacher(client, db)
+        _link_teacher_discipline_group(db, teacher_id, "БИ-41")
         student_id = _insert_user(
             db,
             role="student",
@@ -675,7 +705,7 @@ class TestTeacherFlow:
             password="oldpass123",
             full_name="Reset Me",
             group="БИ-41",
-            assigned_teacher_id=teacher_id,
+            assigned_teacher_id=None,
         )
 
         response = client.post(
@@ -745,6 +775,7 @@ class TestStudentFlow:
         )
         db.commit()
         tid = cur.lastrowid
+        _link_teacher_discipline_group(db, tid, "БИ-41")
         lid = _insert_lecture(db, tid)
         test_id = _insert_test(db, lid, status="published")
         q1 = _insert_question(db, test_id, "В1?", correct_index=0)
@@ -775,6 +806,7 @@ class TestStudentFlow:
         )
         db.commit()
         tid = cur.lastrowid
+        _link_teacher_discipline_group(db, tid, "БИ-41")
         lid = _insert_lecture(db, tid)
         test_id = _insert_test(db, lid)
         q1 = _insert_question(db, test_id, "В1?", correct_index=0)
@@ -800,6 +832,7 @@ class TestStudentFlow:
         )
         db.commit()
         tid = cur.lastrowid
+        _link_teacher_discipline_group(db, tid, "БИ-41")
         lid = _insert_lecture(db, tid)
         test_id = _insert_test(db, lid)
         qid = _insert_question(db, test_id)
@@ -822,6 +855,7 @@ class TestStudentFlow:
         )
         db.commit()
         tid = cur.lastrowid
+        _link_teacher_discipline_group(db, tid, "БИ-41")
         lid = _insert_lecture(db, tid)
         test_id = _insert_test(db, lid)
         qid = _insert_question(db, test_id)
@@ -845,6 +879,17 @@ class TestStudentFlow:
         self._setup_student(client, db)
         r = client.get("/dashboard")
         assert r.status_code == 200
+
+    def test_student_cannot_open_unassigned_test(self, client, db):
+        self._setup_student(client, db)
+        teacher_id = _insert_user(db, role="teacher", login="locked_teacher@test.ru", password="pass123", full_name="Locked Teacher")
+        _link_teacher_discipline_group(db, teacher_id, "БИ-99")
+        lecture_id = _insert_lecture(db, teacher_id, title="Locked Lecture")
+        test_id = _insert_test(db, lecture_id, status="published")
+
+        r = client.get(f"/student/tests/{test_id}/entry", follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers.get("location", "") == "/student/tests"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1085,6 +1130,8 @@ class TestV2Teacher:
 
     def test_students_page_grouped_accordion(self, client, db):
         teacher_id = self._setup(client, db)
+        _link_teacher_discipline_group(db, teacher_id, "G-10")
+        _link_teacher_discipline_group(db, teacher_id, "G-2")
         _insert_user(
             db,
             role="student",
@@ -1092,7 +1139,7 @@ class TestV2Teacher:
             password="pass123",
             full_name="Борис Борисов",
             group="G-10",
-            assigned_teacher_id=teacher_id,
+            assigned_teacher_id=None,
         )
         _insert_user(
             db,
@@ -1101,7 +1148,7 @@ class TestV2Teacher:
             password="pass123",
             full_name="Алексей Алексеев",
             group="G-2",
-            assigned_teacher_id=teacher_id,
+            assigned_teacher_id=None,
         )
         _insert_user(
             db,
@@ -1110,7 +1157,7 @@ class TestV2Teacher:
             password="pass123",
             full_name="Виктор Викторов",
             group="G-2",
-            assigned_teacher_id=teacher_id,
+            assigned_teacher_id=None,
         )
 
         r = client.get("/v2/teacher/students")
@@ -1127,6 +1174,7 @@ class TestV2Teacher:
         cur = db.cursor()
         cur.execute("SELECT id FROM disciplines LIMIT 1")
         discipline_id = int(cur.fetchone()[0])
+        _link_teacher_discipline_group(db, teacher_id, "BI-50", discipline_id)
 
         student_id = _insert_user(
             db,
@@ -1135,7 +1183,7 @@ class TestV2Teacher:
             password="pass123",
             full_name="Perf Student",
             group="BI-50",
-            assigned_teacher_id=teacher_id,
+            assigned_teacher_id=None,
         )
         lecture_id = _insert_lecture(db, teacher_id, title="Perf Lecture", discipline_id=discipline_id)
         test_id = _insert_test(db, lecture_id, status="published", title="Perf Test")
@@ -1151,9 +1199,66 @@ class TestV2Teacher:
         assert "Успеваемость студента" in r.text
 
     def test_analytics_page(self, client, db):
-        self._setup(client, db)
+        teacher_id = self._setup(client, db)
+        discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-51")
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="analytics_stud@t.ru",
+            password="pass123",
+            full_name="Analytics Student",
+            group="BI-51",
+            assigned_teacher_id=None,
+        )
+        lecture_id = _insert_lecture(db, teacher_id, title="Analytics Lecture", discipline_id=discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="Analytics Test")
+        cur = db.cursor()
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, student_id, 72.0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
         r = client.get("/v2/teacher/analytics")
         assert r.status_code == 200
+
+    def test_analytics_excludes_students_outside_assignment(self, client, db):
+        teacher_id = self._setup(client, db)
+        discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-60")
+        lecture_id = _insert_lecture(db, teacher_id, title="Analytics Scope", discipline_id=discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="Scoped Test")
+
+        visible_student_id = _insert_user(
+            db,
+            role="student",
+            login="visible_scope@test.ru",
+            password="pass123",
+            full_name="Visible Student",
+            group="BI-60",
+        )
+        hidden_student_id = _insert_user(
+            db,
+            role="student",
+            login="hidden_scope@test.ru",
+            password="pass123",
+            full_name="Hidden Student",
+            group="BI-61",
+        )
+
+        cur = db.cursor()
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, visible_student_id, 81.0, datetime.utcnow().isoformat()),
+        )
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, hidden_student_id, 49.0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+
+        r = client.get("/v2/teacher/analytics")
+        assert r.status_code == 200
+        assert "Visible Student" in r.text
+        assert "Hidden Student" not in r.text
 
     def test_create_discipline(self, client, db):
         self._setup(client, db)

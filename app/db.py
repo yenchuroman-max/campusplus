@@ -253,6 +253,74 @@ def _backfill_common(cur) -> None:
             (fallback_discipline_id,),
         )
 
+    # Backfill discipline/group/teacher access model from existing group ownership.
+    cur.execute("SELECT id, teacher_id, name FROM groups WHERE teacher_id IS NOT NULL")
+    for row in cur.fetchall():
+        teacher_id = int(row["teacher_id"])
+        group_name = (row["name"] or "").strip()
+        if not group_name:
+            continue
+        cur.execute(
+            "SELECT discipline_id FROM teacher_disciplines WHERE teacher_id = ?",
+            (teacher_id,),
+        )
+        for discipline_row in cur.fetchall():
+            discipline_id = int(discipline_row["discipline_id"])
+            if _use_postgres():
+                cur.execute(
+                    """
+                    INSERT INTO teaching_assignments (teacher_id, discipline_id, group_name)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (teacher_id, discipline_id, group_name) DO NOTHING
+                    """,
+                    (teacher_id, discipline_id, group_name),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO teaching_assignments (teacher_id, discipline_id, group_name)
+                    VALUES (?, ?, ?)
+                    """,
+                    (teacher_id, discipline_id, group_name),
+                )
+
+    # Legacy users may still reference a teacher directly without a proper group catalog row.
+    cur.execute(
+        """
+        SELECT DISTINCT assigned_teacher_id AS teacher_id, COALESCE(student_group, '') AS group_name
+        FROM users
+        WHERE role = 'student' AND assigned_teacher_id IS NOT NULL
+        """
+    )
+    for row in cur.fetchall():
+        teacher_id = row["teacher_id"]
+        if not teacher_id:
+            continue
+        normalized_group = (row["group_name"] or "").strip()
+        cur.execute(
+            "SELECT discipline_id FROM teacher_disciplines WHERE teacher_id = ?",
+            (int(teacher_id),),
+        )
+        for discipline_row in cur.fetchall():
+            discipline_id = int(discipline_row["discipline_id"])
+            if _use_postgres():
+                cur.execute(
+                    """
+                    INSERT INTO teaching_assignments (teacher_id, discipline_id, group_name)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (teacher_id, discipline_id, group_name) DO NOTHING
+                    """,
+                    (int(teacher_id), discipline_id, normalized_group),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO teaching_assignments (teacher_id, discipline_id, group_name)
+                    VALUES (?, ?, ?)
+                    """,
+                    (int(teacher_id), discipline_id, normalized_group),
+                )
+
 
 def _init_db_sqlite() -> None:
     conn = connect()
@@ -398,6 +466,18 @@ def _init_db_sqlite() -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teaching_assignments (
+            teacher_id INTEGER NOT NULL,
+            discipline_id INTEGER NOT NULL,
+            group_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (teacher_id, discipline_id, group_name),
+            FOREIGN KEY (teacher_id) REFERENCES users(id),
+            FOREIGN KEY (discipline_id) REFERENCES disciplines(id)
+        )
+        """
+    )
 
     for discipline_name in DEFAULT_DISCIPLINES:
         cur.execute("INSERT OR IGNORE INTO disciplines (name) VALUES (?)", (discipline_name,))
@@ -522,6 +602,16 @@ def _init_db_postgres() -> None:
             teacher_id BIGINT NOT NULL REFERENCES users(id),
             discipline_id BIGINT NOT NULL REFERENCES disciplines(id),
             PRIMARY KEY (teacher_id, discipline_id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teaching_assignments (
+            teacher_id BIGINT NOT NULL REFERENCES users(id),
+            discipline_id BIGINT NOT NULL REFERENCES disciplines(id),
+            group_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (teacher_id, discipline_id, group_name)
         )
         """
     )

@@ -176,6 +176,211 @@ def get_teacher_discipline_id(cur, teacher_id: int | None) -> int | None:
     return ids[0] if ids else None
 
 
+def normalize_group_name(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def get_teacher_owned_group_names(cur, teacher_id: int | None) -> list[str]:
+    if not teacher_id:
+        return []
+    cur.execute(
+        """
+        SELECT DISTINCT group_name
+        FROM (
+            SELECT name AS group_name
+            FROM groups
+            WHERE teacher_id = ?
+            UNION
+            SELECT COALESCE(student_group, '') AS group_name
+            FROM users
+            WHERE role = 'student' AND assigned_teacher_id = ?
+        ) src
+        ORDER BY group_name
+        """,
+        (teacher_id, teacher_id),
+    )
+    return [normalize_group_name(row["group_name"]) for row in cur.fetchall()]
+
+
+def sync_teacher_group_assignments(
+    cur,
+    teacher_id: int | None,
+    discipline_id: int | None = None,
+    group_name: str | None = None,
+) -> int:
+    if not teacher_id:
+        return 0
+    discipline_ids = [discipline_id] if discipline_id else get_teacher_discipline_ids(cur, teacher_id)
+    if group_name is None:
+        group_names = get_teacher_owned_group_names(cur, teacher_id)
+    else:
+        group_names = [normalize_group_name(group_name)]
+
+    inserted = 0
+    for current_discipline_id in discipline_ids:
+        if not current_discipline_id:
+            continue
+        for current_group_name in group_names:
+            inserted += int(
+                insert_ignore(
+                    cur,
+                    "teaching_assignments",
+                    ("teacher_id", "discipline_id", "group_name"),
+                    (teacher_id, current_discipline_id, current_group_name),
+                    conflict_columns=("teacher_id", "discipline_id", "group_name"),
+                )
+            )
+    return inserted
+
+
+def replace_group_teacher_assignments(
+    cur,
+    group_name: str | None,
+    previous_teacher_id: int | None,
+    next_teacher_id: int | None,
+) -> None:
+    normalized_group = normalize_group_name(group_name)
+    if previous_teacher_id:
+        cur.execute(
+            "DELETE FROM teaching_assignments WHERE teacher_id = ? AND group_name = ?",
+            (previous_teacher_id, normalized_group),
+        )
+    if next_teacher_id:
+        sync_teacher_group_assignments(cur, int(next_teacher_id), group_name=normalized_group)
+
+
+def detach_teacher_discipline_assignments(cur, teacher_id: int | None, discipline_id: int | None) -> None:
+    if not teacher_id or not discipline_id:
+        return
+    cur.execute(
+        "DELETE FROM teaching_assignments WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+
+
+def get_teacher_assignment_groups(cur, teacher_id: int | None, discipline_id: int | None = None) -> list[str]:
+    if not teacher_id:
+        return []
+    params: tuple[Any, ...] = (teacher_id,)
+    where_sql = "WHERE teacher_id = ?"
+    if discipline_id:
+        where_sql += " AND discipline_id = ?"
+        params = (teacher_id, discipline_id)
+    cur.execute(
+        f"""
+        SELECT DISTINCT group_name
+        FROM teaching_assignments
+        {where_sql}
+        ORDER BY group_name
+        """,
+        params,
+    )
+    return [normalize_group_name(row["group_name"]) for row in cur.fetchall()]
+
+
+def get_teacher_students(cur, teacher_id: int | None, query: str = "") -> list[dict[str, Any]]:
+    if not teacher_id:
+        return []
+    params: tuple[Any, ...] = (teacher_id,)
+    search_sql = ""
+    if query.strip():
+        like = f"%{query.strip()}%"
+        search_sql = """
+          AND (
+            u.full_name LIKE ?
+            OR u.email LIKE ?
+            OR COALESCE(u.student_group, '') LIKE ?
+          )
+        """
+        params = (teacher_id, like, like, like)
+    cur.execute(
+        f"""
+        SELECT DISTINCT u.id, u.full_name, u.email, u.last_login, u.student_group
+        FROM users u
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = ?
+         AND ta.group_name = COALESCE(u.student_group, '')
+        WHERE u.role = 'student'
+        {search_sql}
+        ORDER BY COALESCE(u.student_group, ''), u.full_name
+        """,
+        params,
+    )
+    return [user_row_to_dict(row) for row in cur.fetchall()]
+
+
+def get_student_accessible_disciplines(cur, student_group: str | None) -> list[dict[str, Any]]:
+    normalized_group = normalize_group_name(student_group)
+    cur.execute(
+        """
+        SELECT DISTINCT d.id, d.name
+        FROM teaching_assignments ta
+        JOIN disciplines d ON d.id = ta.discipline_id
+        WHERE ta.group_name = ?
+        ORDER BY d.name
+        """,
+        (normalized_group,),
+    )
+    return [dict(row) for row in cur.fetchall()]
+
+
+def get_student_accessible_discipline_ids(cur, student_group: str | None) -> list[int]:
+    return [int(row["id"]) for row in get_student_accessible_disciplines(cur, student_group)]
+
+
+def teacher_can_manage_student(cur, teacher_id: int | None, student_id: int) -> bool:
+    if not teacher_id:
+        return False
+    cur.execute(
+        """
+        SELECT 1
+        FROM users u
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = ?
+         AND ta.group_name = COALESCE(u.student_group, '')
+        WHERE u.id = ? AND u.role = 'student'
+        LIMIT 1
+        """,
+        (teacher_id, student_id),
+    )
+    return bool(cur.fetchone())
+
+
+def get_teacher_student_discipline_ids(cur, teacher_id: int | None, student_id: int) -> list[int]:
+    if not teacher_id:
+        return []
+    cur.execute(
+        """
+        SELECT DISTINCT ta.discipline_id
+        FROM teaching_assignments ta
+        JOIN users u ON ta.group_name = COALESCE(u.student_group, '')
+        WHERE ta.teacher_id = ? AND u.id = ? AND u.role = 'student'
+        ORDER BY ta.discipline_id
+        """,
+        (teacher_id, student_id),
+    )
+    return [int(row["discipline_id"]) for row in cur.fetchall()]
+
+
+def student_can_access_test(cur, student_id: int, test_id: int) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM tests
+        JOIN lectures ON lectures.id = tests.lecture_id
+        JOIN users ON users.id = ?
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = lectures.teacher_id
+         AND ta.discipline_id = lectures.discipline_id
+         AND ta.group_name = COALESCE(users.student_group, '')
+        WHERE tests.id = ? AND tests.status = 'published' AND users.role = 'student'
+        LIMIT 1
+        """,
+        (student_id, test_id),
+    )
+    return bool(cur.fetchone())
+
+
 def ensure_catalog_groups(groups_map: dict[str, list[dict]], managed_groups: list[dict[str, Any]]) -> dict[str, list[dict]]:
     for g in managed_groups:
         name = (g.get("name") or "").strip()
@@ -328,34 +533,23 @@ def build_global_search_sections(cur, user: dict | None, query: str, limit_per_s
     sections: list[dict[str, Any]] = []
 
     if role == "student":
-        if user.get("assigned_teacher_id"):
-            cur.execute(
-                """
-                SELECT t.id, t.title, l.title AS lecture_title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
-                FROM tests t
-                JOIN lectures l ON l.id = t.lecture_id
-                LEFT JOIN disciplines d ON d.id = l.discipline_id
-                WHERE t.status = 'published' AND l.teacher_id = ?
-                  AND (t.title LIKE ? OR l.title LIKE ? OR COALESCE(d.name, '') LIKE ?)
-                ORDER BY t.id DESC
-                LIMIT ?
-                """,
-                (user["assigned_teacher_id"], like, like, like, limit_per_section),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT t.id, t.title, l.title AS lecture_title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
-                FROM tests t
-                JOIN lectures l ON l.id = t.lecture_id
-                LEFT JOIN disciplines d ON d.id = l.discipline_id
-                WHERE t.status = 'published'
-                  AND (t.title LIKE ? OR l.title LIKE ? OR COALESCE(d.name, '') LIKE ?)
-                ORDER BY t.id DESC
-                LIMIT ?
-                """,
-                (like, like, like, limit_per_section),
-            )
+        cur.execute(
+            """
+            SELECT DISTINCT t.id, t.title, l.title AS lecture_title, COALESCE(d.name, 'Без дисциплины') AS discipline_name
+            FROM tests t
+            JOIN lectures l ON l.id = t.lecture_id
+            LEFT JOIN disciplines d ON d.id = l.discipline_id
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = l.teacher_id
+             AND ta.discipline_id = l.discipline_id
+            WHERE t.status = 'published'
+              AND ta.group_name = ?
+              AND (t.title LIKE ? OR l.title LIKE ? OR COALESCE(d.name, '') LIKE ?)
+            ORDER BY t.id DESC
+            LIMIT ?
+            """,
+            (normalize_group_name(user.get("student_group")), like, like, like, limit_per_section),
+        )
         tests_items = [
             {
                 "title": row["title"],
@@ -367,23 +561,17 @@ def build_global_search_sections(cur, user: dict | None, query: str, limit_per_s
         if tests_items:
             sections.append({"title": "Тесты", "items": tests_items})
 
-        if user.get("assigned_teacher_id"):
-            cur.execute(
-                """
-                SELECT d.id, d.name
-                FROM teacher_disciplines td
-                JOIN disciplines d ON d.id = td.discipline_id
-                WHERE td.teacher_id = ? AND d.name LIKE ?
-                ORDER BY d.name
-                LIMIT ?
-                """,
-                (user["assigned_teacher_id"], like, limit_per_section),
-            )
-        else:
-            cur.execute(
-                "SELECT id, name FROM disciplines WHERE name LIKE ? ORDER BY name LIMIT ?",
-                (like, limit_per_section),
-            )
+        cur.execute(
+            """
+            SELECT DISTINCT d.id, d.name
+            FROM teaching_assignments ta
+            JOIN disciplines d ON d.id = ta.discipline_id
+            WHERE ta.group_name = ? AND d.name LIKE ?
+            ORDER BY d.name
+            LIMIT ?
+            """,
+            (normalize_group_name(user.get("student_group")), like, limit_per_section),
+        )
         discipline_items = [
             {"title": row["name"], "meta": "Дисциплина", "href": f"/student/tests?discipline_id={int(row['id'])}"}
             for row in cur.fetchall()
@@ -440,24 +628,14 @@ def build_global_search_sections(cur, user: dict | None, query: str, limit_per_s
         if test_items:
             sections.append({"title": "Тесты", "items": test_items})
 
-        cur.execute(
-            """
-            SELECT id, full_name, email, COALESCE(student_group, '') AS student_group
-            FROM users
-            WHERE role = 'student' AND assigned_teacher_id = ?
-              AND (full_name LIKE ? OR email LIKE ? OR COALESCE(student_group, '') LIKE ?)
-            ORDER BY full_name
-            LIMIT ?
-            """,
-            (user["id"], like, like, like, limit_per_section),
-        )
+        teacher_students = get_teacher_students(cur, int(user["id"]), q)
         student_items = [
             {
                 "title": row["full_name"],
                 "meta": f"Логин: {row['email']}" + (f" · {row['student_group']}" if row["student_group"] else ""),
                 "href": f"/v2/teacher/students/{int(row['id'])}/edit",
             }
-            for row in cur.fetchall()
+            for row in teacher_students[:limit_per_section]
         ]
         if student_items:
             sections.append({"title": "Студенты", "items": student_items})
@@ -1364,20 +1542,7 @@ def dashboard(request: Request):
         )
         history = [dict(row) for row in cur.fetchall()]
 
-        disciplines: list[dict[str, Any]] = []
-        if user.get("assigned_teacher_id"):
-            cur.execute(
-                """
-                SELECT d.id, d.name, u.full_name AS teacher_name
-                FROM teacher_disciplines td
-                JOIN disciplines d ON d.id = td.discipline_id
-                JOIN users u ON u.id = td.teacher_id
-                WHERE td.teacher_id = ? AND u.role = 'teacher'
-                ORDER BY d.name
-                """,
-                (user["assigned_teacher_id"],),
-            )
-            disciplines = [dict(row) for row in cur.fetchall()]
+        disciplines = get_student_accessible_disciplines(cur, user.get("student_group"))
 
         conn.close()
         context["testing_history"] = history
@@ -1400,7 +1565,17 @@ def dashboard(request: Request):
         )
         test_total = int(cur.fetchone()["cnt"])
 
-        cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'student' AND assigned_teacher_id = ?", (user["id"],))
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT u.id) AS cnt
+            FROM users u
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = ?
+             AND ta.group_name = COALESCE(u.student_group, '')
+            WHERE u.role = 'student'
+            """,
+            (user["id"],),
+        )
         student_total = int(cur.fetchone()["cnt"])
 
         cur.execute(
@@ -1409,6 +1584,11 @@ def dashboard(request: Request):
             FROM attempts
             JOIN tests ON tests.id = attempts.test_id
             JOIN lectures ON lectures.id = tests.lecture_id
+            JOIN users students ON students.id = attempts.student_id
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = lectures.teacher_id
+             AND ta.discipline_id = lectures.discipline_id
+             AND ta.group_name = COALESCE(students.student_group, '')
             WHERE lectures.teacher_id = ?
             """,
             (user["id"],),
@@ -1572,7 +1752,7 @@ def _teacher_reset_student_password_impl(
     conn = connect()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, full_name, email, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
+        "SELECT id, full_name, email FROM users WHERE id = ? AND role = 'student'",
         (user_id,),
     )
     target_row = cur.fetchone()
@@ -1582,7 +1762,7 @@ def _teacher_reset_student_password_impl(
         return RedirectResponse(next_path, status_code=302)
 
     target = dict(target_row)
-    if int(target.get("assigned_teacher_id") or 0) != int(teacher["id"]):
+    if not teacher_can_manage_student(cur, int(teacher["id"]), int(user_id)):
         conn.close()
         add_flash(request, "Нет доступа к сбросу пароля этого студента.", "error")
         return RedirectResponse(next_path, status_code=302)
@@ -2579,6 +2759,14 @@ def student_test_entry(request: Request, test_id: int):
         add_flash(request, "Прохождение тестов доступно только для студентов.", "error")
         return RedirectResponse("/dashboard", status_code=302)
 
+    conn = connect()
+    cur = conn.cursor()
+    can_access = student_can_access_test(cur, int(user["id"]), int(test_id))
+    conn.close()
+    if not can_access:
+        add_flash(request, "Этот тест не назначен вашей группе.", "error")
+        return RedirectResponse("/student/tests", status_code=302)
+
     return RedirectResponse(f"/student/tests/{test_id}/take", status_code=302)
 
 
@@ -2598,95 +2786,37 @@ def student_tests(request: Request):
     except Exception:
         discipline_filter = None
 
-    cur.execute("SELECT id, name FROM disciplines ORDER BY name")
-    all_disciplines = [dict(row) for row in cur.fetchall()]
+    all_disciplines = get_student_accessible_disciplines(cur, user.get("student_group"))
+    student_disciplines = list(all_disciplines)
 
-    student_disciplines: list[dict[str, Any]] = []
-    if user.get("assigned_teacher_id"):
-        cur.execute(
-            """
-            SELECT d.id, d.name, u.full_name AS teacher_name
-            FROM teacher_disciplines td
-            JOIN disciplines d ON d.id = td.discipline_id
-            JOIN users u ON u.id = td.teacher_id
-            WHERE td.teacher_id = ? AND u.role = 'teacher'
-            ORDER BY d.name
-            """,
-            (user.get("assigned_teacher_id"),),
+    if discipline_filter and discipline_filter not in {int(item["id"]) for item in student_disciplines}:
+        discipline_filter = None
+
+    query_params: tuple[Any, ...] = (normalize_group_name(user.get("student_group")), user["id"])
+    discipline_sql = ""
+    if discipline_filter:
+        discipline_sql = " AND lectures.discipline_id = ?"
+        query_params = (normalize_group_name(user.get("student_group")), user["id"], discipline_filter)
+    cur.execute(
+        f"""
+        SELECT DISTINCT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
+               a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
+        FROM tests
+        JOIN lectures ON lectures.id = tests.lecture_id
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = lectures.teacher_id
+         AND ta.discipline_id = lectures.discipline_id
+         AND ta.group_name = ?
+        LEFT JOIN attempts a ON a.id = (
+            SELECT MAX(ax.id)
+            FROM attempts ax
+            WHERE ax.test_id = tests.id AND ax.student_id = ?
         )
-        student_disciplines = [dict(row) for row in cur.fetchall()]
-
-    # students should see only tests from their assigned teacher (if assigned)
-    if user.get("assigned_teacher_id"):
-        if discipline_filter:
-            cur.execute(
-                """
-                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
-                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
-                FROM tests
-                JOIN lectures ON lectures.id = tests.lecture_id
-                LEFT JOIN attempts a ON a.id = (
-                    SELECT MAX(ax.id)
-                    FROM attempts ax
-                    WHERE ax.test_id = tests.id AND ax.student_id = ?
-                )
-                WHERE tests.status = 'published' AND lectures.teacher_id = ? AND lectures.discipline_id = ?
-                ORDER BY tests.id DESC
-                """,
-                (user["id"], user.get("assigned_teacher_id"), discipline_filter),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
-                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
-                FROM tests
-                JOIN lectures ON lectures.id = tests.lecture_id
-                LEFT JOIN attempts a ON a.id = (
-                    SELECT MAX(ax.id)
-                    FROM attempts ax
-                    WHERE ax.test_id = tests.id AND ax.student_id = ?
-                )
-                WHERE tests.status = 'published' AND lectures.teacher_id = ?
-                ORDER BY tests.id DESC
-                """,
-                (user["id"], user.get("assigned_teacher_id")),
-            )
-    else:
-        if discipline_filter:
-            cur.execute(
-                """
-                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
-                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
-                FROM tests
-                JOIN lectures ON lectures.id = tests.lecture_id
-                LEFT JOIN attempts a ON a.id = (
-                    SELECT MAX(ax.id)
-                    FROM attempts ax
-                    WHERE ax.test_id = tests.id AND ax.student_id = ?
-                )
-                WHERE tests.status = 'published' AND lectures.discipline_id = ?
-                ORDER BY tests.id DESC
-                """,
-                (user["id"], discipline_filter),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT tests.*, lectures.title AS lecture_title, lectures.discipline_id,
-                       a.id AS attempt_id, a.score AS attempt_score, a.taken_at AS attempt_taken_at
-                FROM tests
-                JOIN lectures ON lectures.id = tests.lecture_id
-                LEFT JOIN attempts a ON a.id = (
-                    SELECT MAX(ax.id)
-                    FROM attempts ax
-                    WHERE ax.test_id = tests.id AND ax.student_id = ?
-                )
-                WHERE tests.status = 'published'
-                ORDER BY tests.id DESC
-                """,
-                (user["id"],),
-            )
+        WHERE tests.status = 'published'{discipline_sql}
+        ORDER BY tests.id DESC
+        """,
+        query_params,
+    )
     tests = [dict(r) for r in cur.fetchall()]
     conn.close()
     discipline_name_by_id = {int(d["id"]): d["name"] for d in all_disciplines}
@@ -2717,6 +2847,10 @@ def take_test_form(request: Request, test_id: int):
     test = cur.fetchone()
     if not test:
         conn.close()
+        return RedirectResponse("/student/tests", status_code=302)
+    if not student_can_access_test(cur, int(user["id"]), int(test_id)):
+        conn.close()
+        add_flash(request, "Этот тест не назначен вашей группе.", "error")
         return RedirectResponse("/student/tests", status_code=302)
 
     cur.execute(
@@ -2750,6 +2884,10 @@ async def take_test_submit(request: Request, test_id: int):
     test = cur.fetchone()
     if not test:
         conn.close()
+        return RedirectResponse("/student/tests", status_code=302)
+    if not student_can_access_test(cur, int(user["id"]), int(test_id)):
+        conn.close()
+        add_flash(request, "Этот тест не назначен вашей группе.", "error")
         return RedirectResponse("/student/tests", status_code=302)
 
     cur.execute(
@@ -3286,6 +3424,7 @@ def admin_assign_teacher_to_discipline(request: Request, discipline_id: int, tea
         "INSERT INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
         (teacher_id, discipline_id),
     )
+    sync_teacher_group_assignments(cur, int(teacher_id), discipline_id=int(discipline_id))
     conn.commit()
     conn.close()
     add_flash(request, "Преподаватель назначен", "success")
@@ -3305,6 +3444,7 @@ def admin_unassign_teacher_from_discipline(request: Request, discipline_id: int,
         "DELETE FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
         (teacher_id, discipline_id),
     )
+    detach_teacher_discipline_assignments(cur, int(teacher_id), int(discipline_id))
     conn.commit()
     conn.close()
     add_flash(request, "Преподаватель снят с дисциплины", "success")
@@ -3340,6 +3480,7 @@ def v1_admin_assign_teacher_to_discipline(request: Request, discipline_id: int, 
         "INSERT INTO teacher_disciplines (teacher_id, discipline_id) VALUES (?, ?)",
         (teacher_id, discipline_id),
     )
+    sync_teacher_group_assignments(cur, int(teacher_id), discipline_id=int(discipline_id))
     conn.commit()
     conn.close()
     add_flash(request, "Преподаватель назначен", "success")
@@ -3357,6 +3498,7 @@ def v1_admin_unassign_teacher_from_discipline(request: Request, discipline_id: i
         "DELETE FROM teacher_disciplines WHERE teacher_id = ? AND discipline_id = ?",
         (teacher_id, discipline_id),
     )
+    detach_teacher_discipline_assignments(cur, int(teacher_id), int(discipline_id))
     conn.commit()
     conn.close()
     add_flash(request, "Преподаватель снят с дисциплины", "success")
@@ -3666,6 +3808,7 @@ def v1_admin_create_group(request: Request, group_name: str = Form(...), teacher
             return RedirectResponse("/v1/admin/groups", status_code=302)
         cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
         cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
+        sync_teacher_group_assignments(cur, int(assigned_teacher), group_name=normalized_name)
         conn.commit()
     except Exception:
         conn.close()
@@ -3710,6 +3853,7 @@ def admin_create_group(request: Request, group_name: str = Form(...), teacher_id
             return RedirectResponse("/admin/groups", status_code=302)
         cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (normalized_name, assigned_teacher))
         cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (assigned_teacher, normalized_name))
+        sync_teacher_group_assignments(cur, int(assigned_teacher), group_name=normalized_name)
         conn.commit()
     except Exception:
         conn.close()
@@ -3794,6 +3938,9 @@ def v1_admin_bind_group_teacher(request: Request, group_name: str, teacher_id: s
     name = group_name.replace("_", " ").strip()
     conn = connect()
     cur = conn.cursor()
+    cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (name,))
+    prev_group_row = cur.fetchone()
+    previous_teacher_id = int(prev_group_row["teacher_id"]) if prev_group_row and prev_group_row["teacher_id"] else None
     cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
     if not cur.fetchone():
         conn.close()
@@ -3801,6 +3948,7 @@ def v1_admin_bind_group_teacher(request: Request, group_name: str, teacher_id: s
         return RedirectResponse(f"/v1/admin/groups/{group_name}", status_code=302)
     cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
     cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
+    replace_group_teacher_assignments(cur, name, previous_teacher_id, teacher_value)
     conn.commit()
     conn.close()
     audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
@@ -3823,6 +3971,9 @@ def admin_bind_group_teacher(request: Request, group_name: str, teacher_id: str 
     name = group_name.replace("_", " ").strip()
     conn = connect()
     cur = conn.cursor()
+    cur.execute("SELECT teacher_id FROM groups WHERE name = ?", (name,))
+    prev_group_row = cur.fetchone()
+    previous_teacher_id = int(prev_group_row["teacher_id"]) if prev_group_row and prev_group_row["teacher_id"] else None
     cur.execute("SELECT id FROM users WHERE id = ? AND role = 'teacher'", (teacher_value,))
     if not cur.fetchone():
         conn.close()
@@ -3830,6 +3981,7 @@ def admin_bind_group_teacher(request: Request, group_name: str, teacher_id: str 
         return RedirectResponse(f"/admin/groups/{group_name}", status_code=302)
     cur.execute("UPDATE groups SET teacher_id = ? WHERE name = ?", (teacher_value, name))
     cur.execute("UPDATE users SET assigned_teacher_id = ? WHERE role = 'student' AND student_group = ?", (teacher_value, name))
+    replace_group_teacher_assignments(cur, name, previous_teacher_id, teacher_value)
     conn.commit()
     conn.close()
     audit_log(request, "bind_group_teacher", details=f"group={name}, teacher_id={teacher_value}")
@@ -4267,6 +4419,10 @@ def teacher_analytics(request: Request):
         JOIN tests ON tests.id = attempts.test_id
         JOIN lectures ON lectures.id = tests.lecture_id
         JOIN users ON users.id = attempts.student_id
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = lectures.teacher_id
+         AND ta.discipline_id = lectures.discipline_id
+         AND ta.group_name = COALESCE(users.student_group, '')
         WHERE lectures.teacher_id = ?
         ORDER BY attempts.taken_at DESC
         """,
@@ -4354,8 +4510,7 @@ def v1_teacher_users(request: Request):
         return RedirectResponse("/login", status_code=302)
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group FROM users WHERE assigned_teacher_id = ? ORDER BY full_name", (user["id"],))
-    students = [user_row_to_dict(r) for r in cur.fetchall()]
+    students = get_teacher_students(cur, int(user["id"]))
     grouped_students = group_students_by_group(students)
     conn.close()
     return templates.TemplateResponse(
@@ -4381,27 +4536,7 @@ def v1_teacher_group(request: Request, group_name: str):
     name = group_name.replace("_", " ")
     conn = connect()
     cur = conn.cursor()
-    if name == "Без группы":
-        cur.execute(
-            """
-            SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
-            FROM users
-            WHERE role = 'student' AND assigned_teacher_id = ? AND (student_group IS NULL OR student_group = '')
-            ORDER BY full_name
-            """,
-            (user["id"],),
-        )
-    else:
-        cur.execute(
-            """
-            SELECT id, role, full_name, email, last_login, assigned_teacher_id, student_group
-            FROM users
-            WHERE role = 'student' AND assigned_teacher_id = ? AND student_group = ?
-            ORDER BY full_name
-            """,
-            (user["id"], name),
-        )
-    rows = [user_row_to_dict(r) for r in cur.fetchall()]
+    rows = [row for row in get_teacher_students(cur, int(user["id"])) if ((row.get("student_group") or "").strip() or "Без группы") == name]
     grouped_students = group_students_by_group(rows)
     conn.close()
     return templates.TemplateResponse(
@@ -4433,7 +4568,7 @@ def v1_teacher_user_edit(request: Request, user_id: int):
         conn.close()
         return RedirectResponse("/v1/teacher/users", status_code=302)
     # only allow teacher to edit students assigned to them
-    if row["assigned_teacher_id"] != user["id"]:
+    if not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         return RedirectResponse("/v1/teacher/users", status_code=302)
     conn.close()
@@ -4448,9 +4583,7 @@ def v1_teacher_user_edit_post(request: Request, user_id: int, student_group: str
         return RedirectResponse("/login", status_code=302)
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT id, assigned_teacher_id FROM users WHERE id = ?", (user_id,))
-    row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         return RedirectResponse("/v1/teacher/users", status_code=302)
     cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
@@ -4473,9 +4606,9 @@ def v1_teacher_set_group(request: Request, user_id: int, student_group: str = Fo
         return RedirectResponse("/login", status_code=302)
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT assigned_teacher_id, student_group FROM users WHERE id = ?", (user_id,))
+    cur.execute("SELECT student_group FROM users WHERE id = ?", (user_id,))
     row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not row or not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         add_flash(request, "Нет доступа для изменения группы этого студента", "error")
         return RedirectResponse("/v1/teacher/users", status_code=302)
@@ -4552,8 +4685,16 @@ def v2_teacher_disciplines(request: Request):
         test_count = int(cur.fetchone()["cnt"])
 
         cur.execute(
-            "SELECT COUNT(*) AS cnt FROM users WHERE role = 'student' AND assigned_teacher_id = ?",
-            (user["id"],),
+            """
+            SELECT COUNT(DISTINCT u.id) AS cnt
+            FROM users u
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = ?
+             AND ta.discipline_id = ?
+             AND ta.group_name = COALESCE(u.student_group, '')
+            WHERE u.role = 'student'
+            """,
+            (user["id"], discipline["id"]),
         )
         student_count = int(cur.fetchone()["cnt"])
 
@@ -4598,6 +4739,7 @@ def v2_teacher_create_discipline(request: Request, discipline_name: str = Form(.
                 conflict_columns=("teacher_id", "discipline_id"),
             )
         )
+        sync_teacher_group_assignments(cur, int(user["id"]), discipline_id=int(discipline_id))
         conn.commit()
     except Exception:
         conn.close()
@@ -4653,6 +4795,7 @@ def v2_teacher_attach_discipline(request: Request, discipline_id: int = Form(...
             conflict_columns=("teacher_id", "discipline_id"),
         )
     )
+    sync_teacher_group_assignments(cur, int(user["id"]), discipline_id=int(discipline_id))
     conn.commit()
     conn.close()
 
@@ -4690,6 +4833,7 @@ def v2_teacher_detach_discipline(request: Request, discipline_id: int):
         (user["id"], discipline_id),
     )
     detached = cur.rowcount > 0
+    detach_teacher_discipline_assignments(cur, int(user["id"]), int(discipline_id))
     conn.commit()
     conn.close()
 
@@ -4790,19 +4934,8 @@ def v2_teacher_students(request: Request):
         return RedirectResponse("/login", status_code=302)
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
-    available_groups = [row["name"] for row in cur.fetchall()]
-
-    cur.execute(
-        """
-        SELECT id, full_name, email, last_login, student_group
-        FROM users
-        WHERE role = 'student' AND assigned_teacher_id = ?
-        ORDER BY student_group, full_name
-        """,
-        (user["id"],),
-    )
-    students = [user_row_to_dict(r) for r in cur.fetchall()]
+    available_groups = [group for group in get_teacher_assignment_groups(cur, int(user["id"])) if group]
+    students = get_teacher_students(cur, int(user["id"]))
     grouped_students = group_students_by_group(students)
     conn.close()
     return render(
@@ -4825,7 +4958,7 @@ def build_teacher_student_performance_context(
 ) -> dict[str, Any] | None:
     cur.execute(
         """
-        SELECT id, full_name, email, last_login, student_group, assigned_teacher_id
+        SELECT id, full_name, email, last_login, student_group
         FROM users
         WHERE id = ? AND role = 'student'
         """,
@@ -4834,34 +4967,35 @@ def build_teacher_student_performance_context(
     student_row = cur.fetchone()
     if not student_row:
         return None
-    student_data = dict(student_row)
-    if int(student_data.get("assigned_teacher_id") or 0) != teacher_id:
+    if not teacher_can_manage_student(cur, teacher_id, student_id):
         return None
 
-    student = user_row_to_dict(student_data)
+    student = user_row_to_dict(dict(student_row))
 
+    allowed_discipline_ids = set(get_teacher_student_discipline_ids(cur, teacher_id, student_id))
+    if not allowed_discipline_ids:
+        return None
     cur.execute(
-        """
-        SELECT d.id, d.name
-        FROM teacher_disciplines td
-        JOIN disciplines d ON d.id = td.discipline_id
-        WHERE td.teacher_id = ?
-        ORDER BY d.name
+        f"""
+        SELECT id, name
+        FROM disciplines
+        WHERE id IN ({', '.join('?' for _ in allowed_discipline_ids)})
+        ORDER BY name
         """,
-        (teacher_id,),
+        tuple(sorted(allowed_discipline_ids)),
     )
     disciplines = [dict(row) for row in cur.fetchall()]
-    allowed_discipline_ids = {int(row["id"]) for row in disciplines}
 
     selected_discipline_id: int | None = None
     if discipline_filter and discipline_filter in allowed_discipline_ids:
         selected_discipline_id = discipline_filter
 
-    tests_params: tuple[Any, ...] = (student_id, teacher_id)
+    student_group_key = normalize_group_name(student.get("student_group"))
+    tests_params: tuple[Any, ...] = (student_group_key, student_id, teacher_id)
     tests_filter_sql = ""
     if selected_discipline_id:
         tests_filter_sql = " AND lectures.discipline_id = ?"
-        tests_params = (student_id, teacher_id, selected_discipline_id)
+        tests_params = (student_group_key, student_id, teacher_id, selected_discipline_id)
 
     cur.execute(
         f"""
@@ -4877,6 +5011,10 @@ def build_teacher_student_performance_context(
         FROM tests
         JOIN lectures ON lectures.id = tests.lecture_id
         LEFT JOIN disciplines d ON d.id = lectures.discipline_id
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = lectures.teacher_id
+         AND ta.discipline_id = lectures.discipline_id
+         AND ta.group_name = ?
         LEFT JOIN attempts a ON a.id = (
             SELECT MAX(ax.id)
             FROM attempts ax
@@ -4889,11 +5027,11 @@ def build_teacher_student_performance_context(
     )
     tests_rows = [dict(row) for row in cur.fetchall()]
 
-    attempts_params: tuple[Any, ...] = (student_id, teacher_id)
+    attempts_params: tuple[Any, ...] = (student_group_key, student_id, teacher_id)
     attempts_filter_sql = ""
     if selected_discipline_id:
         attempts_filter_sql = " AND lectures.discipline_id = ?"
-        attempts_params = (student_id, teacher_id, selected_discipline_id)
+        attempts_params = (student_group_key, student_id, teacher_id, selected_discipline_id)
 
     cur.execute(
         f"""
@@ -4909,6 +5047,10 @@ def build_teacher_student_performance_context(
         JOIN tests ON tests.id = attempts.test_id
         JOIN lectures ON lectures.id = tests.lecture_id
         LEFT JOIN disciplines d ON d.id = lectures.discipline_id
+        JOIN teaching_assignments ta
+          ON ta.teacher_id = lectures.teacher_id
+         AND ta.discipline_id = lectures.discipline_id
+         AND ta.group_name = ?
         WHERE attempts.student_id = ? AND lectures.teacher_id = ?{attempts_filter_sql}
         ORDER BY attempts.taken_at DESC, attempts.id DESC
         """,
@@ -5077,14 +5219,19 @@ def v2_teacher_set_group(request: Request, user_id: int, student_group: str = Fo
 
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT assigned_teacher_id, student_group FROM users WHERE id = ? AND role = 'student'", (user_id,))
+    cur.execute("SELECT student_group FROM users WHERE id = ? AND role = 'student'", (user_id,))
     row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not row or not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         add_flash(request, "Нет доступа к этому студенту", "error")
         return RedirectResponse(next_path, status_code=302)
 
     normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    allowed_groups = set(get_teacher_assignment_groups(cur, int(user["id"])))
+    if normalized_group and normalized_group not in allowed_groups:
+        conn.close()
+        add_flash(request, "Нельзя переместить студента в группу вне ваших дисциплин.", "error")
+        return RedirectResponse(next_path, status_code=302)
     cur.execute("UPDATE users SET student_group = ? WHERE id = ?", (normalized_group, user_id))
     conn.commit()
     conn.close()
@@ -5102,16 +5249,15 @@ def v2_teacher_student_edit(request: Request, user_id: int):
     conn = connect()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, full_name, email, student_group, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
+        "SELECT id, full_name, email, student_group FROM users WHERE id = ? AND role = 'student'",
         (user_id,),
     )
     row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not row or not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         return RedirectResponse("/v2/teacher/students", status_code=302)
 
-    cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
-    available_groups = [group_row["name"] for group_row in cur.fetchall()]
+    available_groups = [group for group in get_teacher_assignment_groups(cur, int(user["id"])) if group]
     conn.close()
 
     return render(
@@ -5142,21 +5288,36 @@ def v2_teacher_student_edit_post(
 
     conn = connect()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id, assigned_teacher_id FROM users WHERE id = ? AND role = 'student'",
-        (user_id,),
-    )
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'student'", (user_id,))
     row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not row or not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         return RedirectResponse("/v2/teacher/students", status_code=302)
 
     normalized_group = "" if (student_group or "").strip() == "__none__" else (student_group or "").strip()
+    allowed_groups = set(get_teacher_assignment_groups(cur, int(user["id"])))
+    if normalized_group and normalized_group not in allowed_groups:
+        available_groups = [group for group in allowed_groups if group]
+        cur.execute(
+            "SELECT id, full_name, email, student_group FROM users WHERE id = ?",
+            (user_id,),
+        )
+        student_row = cur.fetchone()
+        conn.close()
+        return render(
+            request,
+            "v2_teacher_student_edit.html",
+            {
+                "active_tab": "students",
+                "student": dict(student_row) if student_row else {"id": user_id, "full_name": full_name, "email": login or email, "student_group": normalized_group},
+                "available_groups": available_groups,
+                "error": "Нельзя назначить группу вне ваших дисциплин.",
+            },
+        )
     clean_login = validate_login(login or email)
     clean_name = sanitize_full_name(full_name)
     if not clean_login or not clean_name:
-        cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
-        available_groups = [group_row["name"] for group_row in cur.fetchall()]
+        available_groups = [group for group in allowed_groups if group]
         cur.execute(
             "SELECT id, full_name, email, student_group FROM users WHERE id = ?",
             (user_id,),
@@ -5180,8 +5341,7 @@ def v2_teacher_student_edit_post(
         )
         conn.commit()
     except Exception:
-        cur.execute("SELECT name FROM groups WHERE teacher_id = ? ORDER BY name", (user["id"],))
-        available_groups = [group_row["name"] for group_row in cur.fetchall()]
+        available_groups = [group for group in allowed_groups if group]
         cur.execute(
             "SELECT id, full_name, email, student_group FROM users WHERE id = ?",
             (user_id,),
@@ -5213,9 +5373,9 @@ def v2_teacher_student_delete(request: Request, user_id: int):
 
     conn = connect()
     cur = conn.cursor()
-    cur.execute("SELECT assigned_teacher_id FROM users WHERE id = ? AND role = 'student'", (user_id,))
+    cur.execute("SELECT id FROM users WHERE id = ? AND role = 'student'", (user_id,))
     row = cur.fetchone()
-    if not row or row["assigned_teacher_id"] != user["id"]:
+    if not row or not teacher_can_manage_student(cur, int(user["id"]), int(user_id)):
         conn.close()
         add_flash(request, "Нет доступа к этому студенту", "error")
         return RedirectResponse("/v2/teacher/students", status_code=302)
@@ -5271,6 +5431,10 @@ def v2_teacher_analytics(request: Request):
             JOIN tests ON tests.id = attempts.test_id
             JOIN lectures ON lectures.id = tests.lecture_id
             JOIN users ON users.id = attempts.student_id
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = lectures.teacher_id
+             AND ta.discipline_id = lectures.discipline_id
+             AND ta.group_name = COALESCE(users.student_group, '')
             WHERE lectures.teacher_id = ? AND lectures.discipline_id = ?
             ORDER BY users.full_name
             """,
@@ -5285,6 +5449,10 @@ def v2_teacher_analytics(request: Request):
             JOIN tests ON tests.id = attempts.test_id
             JOIN lectures ON lectures.id = tests.lecture_id
             JOIN users ON users.id = attempts.student_id
+            JOIN teaching_assignments ta
+              ON ta.teacher_id = lectures.teacher_id
+             AND ta.discipline_id = lectures.discipline_id
+             AND ta.group_name = COALESCE(users.student_group, '')
             WHERE lectures.teacher_id = ?
             ORDER BY users.full_name
             """,
