@@ -243,6 +243,10 @@ def remove_group_teacher(cur, group_name: str, teacher_id: int) -> bool:
         "DELETE FROM teaching_assignments WHERE teacher_id = ? AND group_name = ?",
         (teacher_id, normalized),
     )
+    cur.execute(
+        "DELETE FROM teaching_assignment_blocks WHERE teacher_id = ? AND group_name = ?",
+        (teacher_id, normalized),
+    )
     next_teacher_id = refresh_group_primary_teacher(cur, normalized)
     cur.execute(
         """
@@ -268,12 +272,69 @@ def delete_group_if_empty(cur, group_name: str) -> tuple[bool, str]:
     if student_count > 0:
         return False, "Сначала уберите студентов из группы"
     cur.execute("DELETE FROM teaching_assignments WHERE group_name = ?", (normalized,))
+    cur.execute("DELETE FROM teaching_assignment_blocks WHERE group_name = ?", (normalized,))
     cur.execute("DELETE FROM group_teachers WHERE group_name = ?", (normalized,))
     cur.execute("DELETE FROM groups WHERE name = ?", (normalized,))
     deleted = cur.rowcount > 0
     if not deleted:
         return False, "Группа не найдена"
     return True, "Группа удалена"
+
+
+def get_teacher_assignment_blocks(
+    cur,
+    teacher_id: int | None,
+    discipline_id: int | None = None,
+) -> set[tuple[int, str]]:
+    if not teacher_id:
+        return set()
+    params: tuple[Any, ...] = (teacher_id,)
+    where_sql = "WHERE teacher_id = ?"
+    if discipline_id:
+        where_sql += " AND discipline_id = ?"
+        params = (teacher_id, discipline_id)
+    cur.execute(
+        f"""
+        SELECT discipline_id, group_name
+        FROM teaching_assignment_blocks
+        {where_sql}
+        """,
+        params,
+    )
+    return {
+        (int(row["discipline_id"]), normalize_group_name(row["group_name"]))
+        for row in cur.fetchall()
+        if row["discipline_id"] and normalize_group_name(row["group_name"])
+    }
+
+
+def block_teacher_assignment(cur, teacher_id: int | None, discipline_id: int | None, group_name: str | None) -> bool:
+    normalized_group = normalize_group_name(group_name)
+    if not teacher_id or not discipline_id or not normalized_group:
+        return False
+    return bool(
+        insert_ignore(
+            cur,
+            "teaching_assignment_blocks",
+            ("teacher_id", "discipline_id", "group_name"),
+            (teacher_id, discipline_id, normalized_group),
+            conflict_columns=("teacher_id", "discipline_id", "group_name"),
+        )
+    )
+
+
+def unblock_teacher_assignment(cur, teacher_id: int | None, discipline_id: int | None, group_name: str | None) -> bool:
+    normalized_group = normalize_group_name(group_name)
+    if not teacher_id or not discipline_id or not normalized_group:
+        return False
+    cur.execute(
+        """
+        DELETE FROM teaching_assignment_blocks
+        WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+        """,
+        (teacher_id, discipline_id, normalized_group),
+    )
+    return cur.rowcount > 0
 
 
 def get_discipline_map(cur) -> dict[int, str]:
@@ -389,12 +450,15 @@ def sync_teacher_group_assignments(
         group_names = get_teacher_owned_group_names(cur, teacher_id)
     else:
         group_names = [normalize_group_name(group_name)]
+    blocked_assignments = get_teacher_assignment_blocks(cur, teacher_id, discipline_id)
 
     inserted = 0
     for current_discipline_id in discipline_ids:
         if not current_discipline_id:
             continue
         for current_group_name in group_names:
+            if (int(current_discipline_id), normalize_group_name(current_group_name)) in blocked_assignments:
+                continue
             inserted += int(
                 insert_ignore(
                     cur,
@@ -412,6 +476,10 @@ def detach_teacher_discipline_assignments(cur, teacher_id: int | None, disciplin
         return
     cur.execute(
         "DELETE FROM teaching_assignments WHERE teacher_id = ? AND discipline_id = ?",
+        (teacher_id, discipline_id),
+    )
+    cur.execute(
+        "DELETE FROM teaching_assignment_blocks WHERE teacher_id = ? AND discipline_id = ?",
         (teacher_id, discipline_id),
     )
 
@@ -485,14 +553,20 @@ def sync_teacher_attempt_group_assignments(
         params,
     )
 
+    attempt_rows = [dict(row) for row in cur.fetchall()]
+    blocked_assignments = get_teacher_assignment_blocks(cur, teacher_id, discipline_id)
     inserted = 0
-    for row in cur.fetchall():
+    for row in attempt_rows:
+        normalized_group = normalize_group_name(row["group_name"])
+        current_discipline_id = int(row["discipline_id"])
+        if (current_discipline_id, normalized_group) in blocked_assignments:
+            continue
         inserted += int(
             insert_ignore(
                 cur,
                 "teaching_assignments",
                 ("teacher_id", "discipline_id", "group_name"),
-                (teacher_id, int(row["discipline_id"]), normalize_group_name(row["group_name"])),
+                (teacher_id, current_discipline_id, normalized_group),
                 conflict_columns=("teacher_id", "discipline_id", "group_name"),
             )
         )
@@ -5249,6 +5323,7 @@ def v2_teacher_assign_group_to_discipline(
         add_flash(request, "Дисциплина недоступна", "error")
         return RedirectResponse("/v2/teacher/groups", status_code=302)
 
+    unblock_teacher_assignment(cur, int(user["id"]), int(discipline_id), normalized_group)
     linked = bool(
         insert_ignore(
             cur,
@@ -5301,6 +5376,7 @@ def v2_teacher_unassign_group_from_discipline(
         (user["id"], discipline_id, normalized_group),
     )
     detached = cur.rowcount > 0
+    block_teacher_assignment(cur, int(user["id"]), int(discipline_id), normalized_group)
     conn.commit()
     conn.close()
 

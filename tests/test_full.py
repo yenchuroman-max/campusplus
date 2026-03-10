@@ -1263,6 +1263,86 @@ class TestV2Teacher:
         )
         assert cur.fetchone() is not None
 
+    def test_unassign_group_from_discipline_blocks_attempt_backfill(self, client, db):
+        teacher_id = self._setup(client, db)
+        discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-78")
+        student_id = _insert_user(
+            db,
+            role="student",
+            login="blocked_backfill@test.ru",
+            password="pass123",
+            full_name="Blocked Backfill Student",
+            group="BI-78",
+            assigned_teacher_id=None,
+        )
+        lecture_id = _insert_lecture(db, teacher_id, title="Blocked Backfill Lecture", discipline_id=discipline_id)
+        test_id = _insert_test(db, lecture_id, status="published", title="Blocked Backfill Test")
+        cur = db.cursor()
+        cur.execute(
+            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+            (test_id, student_id, 83.0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+
+        r = client.post(
+            "/v2/teacher/groups/unassign",
+            data={"group_name": "BI-78", "discipline_id": str(discipline_id)},
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+
+        client.get("/v2/teacher/disciplines")
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignments
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-78"),
+        )
+        assert cur.fetchone() is None
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignment_blocks
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-78"),
+        )
+        assert cur.fetchone() is not None
+
+    def test_reassign_group_to_discipline_clears_manual_block(self, client, db):
+        teacher_id = self._setup(client, db)
+        discipline_id = _link_teacher_discipline_group(db, teacher_id, "BI-79")
+
+        client.post(
+            "/v2/teacher/groups/unassign",
+            data={"group_name": "BI-79", "discipline_id": str(discipline_id)},
+            follow_redirects=False,
+        )
+        r = client.post(
+            "/v2/teacher/groups/assign",
+            data={"group_name": "BI-79", "discipline_id": str(discipline_id)},
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignments
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-79"),
+        )
+        assert cur.fetchone() is not None
+        cur.execute(
+            """
+            SELECT 1 FROM teaching_assignment_blocks
+            WHERE teacher_id = ? AND discipline_id = ? AND group_name = ?
+            """,
+            (teacher_id, discipline_id, "BI-79"),
+        )
+        assert cur.fetchone() is None
+
     def test_students_page(self, client, db):
         self._setup(client, db)
         r = client.get("/v2/teacher/students")

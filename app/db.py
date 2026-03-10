@@ -512,6 +512,18 @@ def _init_db_sqlite() -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teaching_assignment_blocks (
+            teacher_id INTEGER NOT NULL,
+            discipline_id INTEGER NOT NULL,
+            group_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (teacher_id, discipline_id, group_name),
+            FOREIGN KEY (teacher_id) REFERENCES users(id),
+            FOREIGN KEY (discipline_id) REFERENCES disciplines(id)
+        )
+        """
+    )
 
     for discipline_name in DEFAULT_DISCIPLINES:
         cur.execute("INSERT OR IGNORE INTO disciplines (name) VALUES (?)", (discipline_name,))
@@ -651,6 +663,16 @@ def _init_db_postgres() -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS teaching_assignments (
+            teacher_id BIGINT NOT NULL REFERENCES users(id),
+            discipline_id BIGINT NOT NULL REFERENCES disciplines(id),
+            group_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (teacher_id, discipline_id, group_name)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teaching_assignment_blocks (
             teacher_id BIGINT NOT NULL REFERENCES users(id),
             discipline_id BIGINT NOT NULL REFERENCES disciplines(id),
             group_name TEXT NOT NULL DEFAULT '',
