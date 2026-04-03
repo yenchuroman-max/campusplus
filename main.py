@@ -1923,6 +1923,12 @@ def vkr_portal_page(request: Request):
     )
 
 
+@app.get("/presentation", response_class=HTMLResponse)
+def presentation_page():
+    pres_path = Path(__file__).parent / "campusplus_presentation_vkr_2026.html"
+    return HTMLResponse(pres_path.read_text(encoding="utf-8"))
+
+
 @app.get("/vkr/aprobation", response_class=HTMLResponse)
 def vkr_aprobation_page(request: Request):
     return _render_vkr_evidence_page(request, "aprobation")
