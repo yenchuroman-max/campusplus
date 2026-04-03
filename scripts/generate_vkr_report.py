@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Генерация отчёта ВКР «КампусПлюс» на базе шаблона пример.docx.
+Генерация отчёта ВКР «КампусПлюс» по шаблону Артема (Артем ВКР готовый.docx).
 
 Копирует шаблон (сохраняя стили, колонтитулы, нумерацию) и заполняет
-контентом проекта CampusPlus.
+контентом проекта CampusPlus.  Все абзацы явно форматируются
+Times New Roman 14pt, интервал 1.5, выравнивание по ширине.
 
 Usage:
     cd diplom-campusplus-main
@@ -12,26 +13,62 @@ Usage:
 Output:  ВКР_Енчу_КампусПлюс.docx  (в корне проекта)
 """
 from __future__ import annotations
-import shutil, pathlib, sys, copy
+import shutil, pathlib, sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 from docx import Document
-from docx.shared import Pt, Cm, Emu, Inches
+from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
+from lxml import etree
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TEMPLATE = pathlib.Path(r"C:\Users\sashka1337\Downloads\пример.docx")
+TEMPLATE = pathlib.Path(
+    r"C:\Users\sashka1337\Downloads\Telegram Desktop\Артем ВКР готовый.docx"
+)
 OUTPUT = ROOT / "ВКР_Енчу_КампусПлюс.docx"
 IMAGES = ROOT / "presentation_assets" / "desktop"
 DIAGRAMS = ROOT / "presentation_assets" / "diagrams"
-MOBILE = ROOT / "mobile_screens"
 
-# ── helpers ───────────────────────────────────────────────────
+# ── formatting helpers ────────────────────────────────────────
+
+def _fmt(run, size=14, bold=None):
+    """Apply Times New Roman, size, bold and black colour to a run."""
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(size)
+    run.font.color.rgb = RGBColor(0, 0, 0)
+    if bold is not None:
+        run.bold = bold
+
+
+def _pfmt(p, align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+          indent=Cm(1.25), spacing=1.5):
+    """Set paragraph alignment, first-line indent and line spacing."""
+    p.alignment = align
+    pf = p.paragraph_format
+    pf.line_spacing = spacing
+    pf.space_after = Pt(0)
+    pf.space_before = Pt(0)
+    if indent is not None:
+        pf.first_line_indent = indent
+    else:
+        pf.first_line_indent = Cm(0)
+
+
+def _set_outline(p, level):
+    """Set a paragraph's outlineLvl so it appears in the TOC."""
+    pPr = p._element.find(qn("w:pPr"))
+    if pPr is None:
+        pPr = etree.SubElement(p._element, qn("w:pPr"))
+        p._element.insert(0, pPr)
+    ol = etree.SubElement(pPr, qn("w:outlineLvl"))
+    ol.set(qn("w:val"), str(level))
+
+
+# ── content helpers ───────────────────────────────────────────
+
 def clear_body(doc: Document):
-    """Remove all paragraphs, tables and SDTs from body."""
     body = doc.element.body
     for child in list(body):
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
@@ -39,171 +76,188 @@ def clear_body(doc: Document):
             body.remove(child)
 
 
-def add_para(doc, text="", style_name=None, bold=None, alignment=None):
-    """Add paragraph with given style. Returns paragraph."""
-    p = doc.add_paragraph(style=style_name)
+def add_text(doc, text, align=None, size=14, bold=None, indent=None):
+    """General-purpose text paragraph with explicit formatting."""
+    p = doc.add_paragraph()
     if text:
-        run = p.add_run(text)
-        if bold is not None:
-            run.bold = bold
-    if alignment is not None:
-        p.alignment = alignment
+        r = p.add_run(text)
+        _fmt(r, size=size, bold=bold)
+    pf = p.paragraph_format
+    pf.line_spacing = 1.5
+    pf.space_after = Pt(0)
+    pf.space_before = Pt(0)
+    if align is not None:
+        p.alignment = align
+    if indent is not None:
+        pf.first_line_indent = indent
+    else:
+        pf.first_line_indent = Cm(0)
     return p
 
 
 def add_body(doc, text):
-    """Add body text paragraph (основной текст)."""
-    return add_para(doc, text, "!Основной текст работы")
+    """Body text: TNR 14, justify, 1.25 cm indent."""
+    return add_text(doc, text,
+                    align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                    indent=Cm(1.25))
 
 
-def add_h_center(doc, text, bold=False):
-    """Add center-aligned heading."""
-    p = add_para(doc, "", "!Заголовки по центру")
-    run = p.add_run(text)
-    run.bold = bold
-    return p
+def add_center(doc, text, size=14, bold=False):
+    """Centred text (title page, pre-content headings)."""
+    return add_text(doc, text,
+                    align=WD_ALIGN_PARAGRAPH.CENTER,
+                    size=size, bold=bold)
+
+
+def add_right(doc, text, size=14, bold=False):
+    return add_text(doc, text,
+                    align=WD_ALIGN_PARAGRAPH.RIGHT,
+                    size=size, bold=bold)
 
 
 def add_heading1(doc, text):
-    """Add level-1 section heading (like '1 АНАЛИЗ ПРЕДМЕТНОЙ ОБЛАСТИ')."""
-    p = add_para(doc, "", "!Заголовки 1 уровня")
-    run = p.add_run(text)
-    run.bold = True
+    """Major section — Heading 1, centred, bold, appears in TOC level 1."""
+    p = doc.add_paragraph(style="Heading 1")
+    r = p.add_run(text)
+    _fmt(r, bold=True)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pf = p.paragraph_format
+    pf.space_before = Pt(12)
+    pf.space_after = Pt(6)
+    pf.first_line_indent = Cm(0)
+    pf.line_spacing = 1.5
     return p
 
 
 def add_heading2(doc, text):
-    """Add level-2 section heading (like '1.1 Характеристика')."""
-    p = add_para(doc, "", "!Заголовки 2 уровня")
-    run = p.add_run(text)
-    run.bold = True
+    """Sub-section — Normal + outlineLvl 1, appears in TOC level 2."""
+    p = doc.add_paragraph()
+    r = p.add_run(text)
+    _fmt(r, bold=True)
+    _pfmt(p, indent=Cm(1.25))
+    pf = p.paragraph_format
+    pf.space_before = Pt(12)
+    pf.space_after = Pt(6)
+    _set_outline(p, 1)
     return p
 
 
 def add_heading3(doc, text):
-    """Add level-3 heading (like '3.1.1 Создание диаграммы')."""
-    p = add_para(doc, "", "!Заголовки 3 уровня")
-    run = p.add_run(text)
-    run.bold = True
+    """Sub-sub-section — Normal + outlineLvl 2, appears in TOC level 3."""
+    p = doc.add_paragraph()
+    r = p.add_run(text)
+    _fmt(r, bold=True)
+    _pfmt(p, indent=Cm(1.25))
+    pf = p.paragraph_format
+    pf.space_before = Pt(6)
+    pf.space_after = Pt(4)
+    _set_outline(p, 2)
+    return p
+
+
+def add_list_item(doc, text):
+    """List Paragraph — TNR 14, justify."""
+    try:
+        p = doc.add_paragraph(style="List Paragraph")
+    except KeyError:
+        p = doc.add_paragraph()
+    r = p.add_run(text)
+    _fmt(r)
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    pf = p.paragraph_format
+    pf.line_spacing = 1.5
+    pf.space_after = Pt(0)
+    pf.space_before = Pt(0)
     return p
 
 
 def add_figure(doc, img_path, caption, width_cm=15):
-    """Insert image with caption using '!Рисунки и подписи к ним' style."""
-    p_img = add_para(doc, "", "!Рисунки и подписи к ним")
+    """Insert image + caption, both centred."""
+    p_img = doc.add_paragraph()
+    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_img.paragraph_format.first_line_indent = Cm(0)
+    p_img.paragraph_format.line_spacing = 1.5
     run = p_img.add_run()
     if pathlib.Path(img_path).exists():
         run.add_picture(str(img_path), width=Cm(width_cm))
     else:
         run.add_text(f"[Изображение: {img_path}]")
-    p_cap = add_para(doc, caption, "!Рисунки и подписи к ним")
+        _fmt(run)
+    p_cap = add_center(doc, caption)
     return p_cap
-
-
-def add_bib(doc, text):
-    """Add bibliography entry."""
-    return add_para(doc, text, "!Список литературы")
 
 
 def add_empty(doc, n=1):
     for _ in range(n):
-        add_para(doc, "")
+        add_text(doc, "")
 
 
 def add_toc_field(doc):
-    """Insert a Word TOC field (SDT) with clickable hyperlinks.
-    When user opens the docx and presses Ctrl+A,F9 or right-clicks TOC ->
-    'Update field', Word rebuilds page numbers automatically."""
-    from lxml import etree
-    W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-    nsmap_w = {'w': W}
+    """Insert a Word TOC field as regular paragraph with field codes."""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.line_spacing = 1.5
 
-    # Build SDT wrapper
-    sdt = etree.SubElement(doc.element.body, qn('w:sdt'))
-    sdt_pr = etree.SubElement(sdt, qn('w:sdtPr'))
-    doc_part_obj = etree.SubElement(sdt_pr, qn('w:docPartObj'))
-    etree.SubElement(doc_part_obj, qn('w:docPartGallery')).set(qn('w:val'), 'Table of Contents')
-    etree.SubElement(doc_part_obj, qn('w:docPartUnique'))
-
-    sdt_content = etree.SubElement(sdt, qn('w:sdtContent'))
-
-    # Paragraph with TOC field code
-    p = etree.SubElement(sdt_content, qn('w:p'))
     # fldChar begin
-    r1 = etree.SubElement(p, qn('w:r'))
-    fc_begin = etree.SubElement(r1, qn('w:fldChar'))
-    fc_begin.set(qn('w:fldCharType'), 'begin')
-    # instrText
-    r2 = etree.SubElement(p, qn('w:r'))
-    instr = etree.SubElement(r2, qn('w:instrText'))
-    instr.set(qn('xml:space'), 'preserve')
-    instr.text = (' TOC \\o "1-3" \\h \\z '
-                  '\\t "!Заголовки 1 уровня;1;'
-                  '!Заголовки 2 уровня;2;'
-                  '!Заголовки 3 уровня;3;'
-                  '!Заголовки по центру;1"')
-    # fldChar separate
-    r3 = etree.SubElement(p, qn('w:r'))
-    fc_sep = etree.SubElement(r3, qn('w:fldChar'))
-    fc_sep.set(qn('w:fldCharType'), 'separate')
-    # Placeholder text
-    r4 = etree.SubElement(p, qn('w:r'))
-    rpr = etree.SubElement(r4, qn('w:rPr'))
-    rfonts = etree.SubElement(rpr, qn('w:rFonts'))
-    rfonts.set(qn('w:ascii'), 'Times New Roman')
-    rfonts.set(qn('w:hAnsi'), 'Times New Roman')
-    sz = etree.SubElement(rpr, qn('w:sz'))
-    sz.set(qn('w:val'), '28')
-    t = etree.SubElement(r4, qn('w:t'))
-    t.text = '[Обновите оглавление: ПКМ → Обновить поле]'
-    # fldChar end
-    r5 = etree.SubElement(p, qn('w:r'))
-    fc_end = etree.SubElement(r5, qn('w:fldChar'))
-    fc_end.set(qn('w:fldCharType'), 'end')
+    r1 = p.add_run()
+    fc_begin = etree.SubElement(r1._element, qn("w:fldChar"))
+    fc_begin.set(qn("w:fldCharType"), "begin")
 
-    return sdt
+    # instrText
+    r2 = p.add_run()
+    instr = etree.SubElement(r2._element, qn("w:instrText"))
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+
+    # fldChar separate
+    r3 = p.add_run()
+    fc_sep = etree.SubElement(r3._element, qn("w:fldChar"))
+    fc_sep.set(qn("w:fldCharType"), "separate")
+
+    # Placeholder text (visible until field is updated)
+    r4 = p.add_run("Нажмите ПКМ → Обновить поле")
+    _fmt(r4)
+
+    # fldChar end
+    r5 = p.add_run()
+    fc_end = etree.SubElement(r5._element, qn("w:fldChar"))
+    fc_end.set(qn("w:fldCharType"), "end")
+    return p
 
 
 def format_table(table, col_widths_cm=None):
-    """Apply Times New Roman 14pt and borders to every cell in table."""
-    from docx.shared import Cm, Pt
-    from lxml import etree
-
-    # Set column widths if provided
+    """Apply TNR 14 pt, black borders and 100 % width to a table."""
     if col_widths_cm:
         for row in table.rows:
             for ci, cell in enumerate(row.cells):
                 if ci < len(col_widths_cm):
                     cell.width = Cm(col_widths_cm[ci])
-
-    # Format all cells
     for row in table.rows:
         for cell in row.cells:
             for paragraph in cell.paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.paragraph_format.line_spacing = 1.0
+                paragraph.paragraph_format.space_after = Pt(0)
+                paragraph.paragraph_format.space_before = Pt(0)
                 for run in paragraph.runs:
-                    run.font.name = 'Times New Roman'
-                    run.font.size = Pt(14)
-
-    # Add borders via XML
+                    _fmt(run)
     tbl = table._tbl
-    tbl_pr = tbl.find(qn('w:tblPr'))
+    tbl_pr = tbl.find(qn("w:tblPr"))
     if tbl_pr is None:
-        tbl_pr = etree.SubElement(tbl, qn('w:tblPr'))
-    borders = etree.SubElement(tbl_pr, qn('w:tblBorders'))
-    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-        el = etree.SubElement(borders, qn(f'w:{edge}'))
-        el.set(qn('w:val'), 'single')
-        el.set(qn('w:sz'), '4')
-        el.set(qn('w:space'), '0')
-        el.set(qn('w:color'), '000000')
-
-    # Auto-fit table to page width
-    tbl_w = tbl_pr.find(qn('w:tblW'))
+        tbl_pr = etree.SubElement(tbl, qn("w:tblPr"))
+    borders = etree.SubElement(tbl_pr, qn("w:tblBorders"))
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = etree.SubElement(borders, qn(f"w:{edge}"))
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), "4")
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), "000000")
+    tbl_w = tbl_pr.find(qn("w:tblW"))
     if tbl_w is None:
-        tbl_w = etree.SubElement(tbl_pr, qn('w:tblW'))
-    tbl_w.set(qn('w:type'), 'pct')
-    tbl_w.set(qn('w:w'), '5000')  # 100% of page width
+        tbl_w = etree.SubElement(tbl_pr, qn("w:tblW"))
+    tbl_w.set(qn("w:type"), "pct")
+    tbl_w.set(qn("w:w"), "5000")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -214,99 +268,139 @@ def main():
         print(f"ERROR: шаблон не найден: {TEMPLATE}")
         sys.exit(1)
 
-    # Copy template
     shutil.copy2(TEMPLATE, OUTPUT)
     doc = Document(str(OUTPUT))
     clear_body(doc)
 
     # ── ТИТУЛЬНЫЙ ЛИСТ ────────────────────────────────────────
-    add_para(doc, "Министерство науки и высшего образования Российской Федерации",
-             alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    p = add_para(doc, "", alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    r = p.add_run("Федеральное государственное бюджетное образовательное учреждение "
-                   "высшего образования  «СИБИРСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ "
-                   "ГЕОСИСТЕМ И ТЕХНОЛОГИЙ»")
-    p = add_para(doc, "(СГУГиТ)", alignment=WD_ALIGN_PARAGRAPH.CENTER)
-
-    add_para(doc, "Кафедра прикладной информатики и информационных систем",
-             "Body Text", alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    add_empty(doc, 2)
-    add_para(doc, "Выпускная квалификационная работа соответствует установленным "
-             "требованиям и направляется в ГЭК для защиты",
-             "Body Text", alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    add_para(doc, "Заведующий кафедрой Т. Ю. Бугакова", "Body Text")
+    add_center(doc, "Министерство науки и высшего образования "
+               "Российской Федерации")
+    add_center(doc, "Федеральное государственное бюджетное "
+               "образовательное учреждение высшего образования  "
+               "«СИБИРСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ "
+               "ГЕОСИСТЕМ И ТЕХНОЛОГИЙ»")
+    add_center(doc, "(СГУГиТ)")
     add_empty(doc)
-    add_h_center(doc, "ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА", bold=True)
-    add_para(doc, "Программа бакалавриата", "Body Text",
-             alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    add_para(doc, "09.03.02 – Информационные системы и технологии", "Body Text",
-             alignment=WD_ALIGN_PARAGRAPH.CENTER)
+    add_center(doc, "Кафедра прикладной информатики "
+               "и информационных систем")
+    add_empty(doc, 2)
+    add_center(doc, "Выпускная квалификационная работа "
+               "соответствует установленным требованиям "
+               "и направляется в ГЭК для защиты")
+    add_text(doc, "Заведующий кафедрой      Т. Ю. Бугакова",
+             align=WD_ALIGN_PARAGRAPH.JUSTIFY)
     add_empty(doc)
-    p = add_para(doc, "", "!Название ВКР")
-    r = p.add_run("РАЗРАБОТКА ВЕБ-СЕРВИСА ДЛЯ МОНИТОРИНГА УСПЕВАЕМОСТИ "
-                   "С ПРИМЕНЕНИЕМ ТЕХНОЛОГИЙ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА")
-    r.bold = True
+    add_center(doc, "ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА", bold=True)
+    add_center(doc, "Программа бакалавриата")
+    add_center(doc, "09.03.02 – Информационные системы и технологии",
+               size=16)
+    add_empty(doc)
+    add_center(doc,
+        "РАЗРАБОТКА ВЕБ-СЕРВИСА ДЛЯ МОНИТОРИНГА УСПЕВАЕМОСТИ "
+        "С ПРИМЕНЕНИЕМ ТЕХНОЛОГИЙ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА",
+        size=20, bold=True)
     add_empty(doc, 2)
-    add_para(doc, "Выпускник\tР. В. Енчу", "Body Text")
-    add_para(doc, "Руководитель\tА. А. Басаргин", "Body Text")
-    add_para(doc, "Нормоконтролер\tС. Ю. Кацко", "Body Text")
-    add_empty(doc, 2)
-    add_para(doc, "Новосибирск – 2026", "Body Text",
-             alignment=WD_ALIGN_PARAGRAPH.CENTER)
+    add_text(doc, "Выпускник\t\t\tР. В. Енчу",
+             align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+    add_empty(doc)
+    add_text(doc, "Руководитель\t\t\tА. А. Басаргин",
+             align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+    add_empty(doc)
+    add_text(doc, "Нормоконтролер\t\tС. Ю. Кацко",
+             align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+    add_empty(doc, 3)
+    add_center(doc, "Новосибирск – 2026")
 
-    # ── PAGE BREAK ──
     doc.add_page_break()
 
     # ── ЗАДАНИЕ ────────────────────────────────────────────────
-    add_para(doc, "Министерство науки и высшего образования Российской Федерации",
-             alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    p = add_para(doc, "", alignment=WD_ALIGN_PARAGRAPH.CENTER)
-    p.add_run("Федеральное государственное бюджетное образовательное учреждение "
-              "высшего образования  «СИБИРСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ "
-              "ГЕОСИСТЕМ И ТЕХНОЛОГИЙ»")
-    add_para(doc, "(СГУГиТ)", alignment=WD_ALIGN_PARAGRAPH.CENTER)
+    add_center(doc, "Министерство науки и высшего образования "
+               "Российской Федерации")
+    add_center(doc, "Федеральное государственное бюджетное "
+               "образовательное учреждение высшего образования  "
+               "«СИБИРСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ "
+               "ГЕОСИСТЕМ И ТЕХНОЛОГИЙ»")
+    add_center(doc, "(СГУГиТ)")
     add_empty(doc)
-    add_para(doc, "УТВЕРЖДАЮ", "Body Text", alignment=WD_ALIGN_PARAGRAPH.RIGHT)
-    add_para(doc, "Зав. кафедрой  Т. Ю. Бугакова", "Body Text",
-             alignment=WD_ALIGN_PARAGRAPH.RIGHT)
-    add_para(doc, "«___» __________ 2026 г.", "Body Text",
-             alignment=WD_ALIGN_PARAGRAPH.RIGHT)
+    add_right(doc, "УТВЕРЖДАЮ")
+    add_right(doc, "Зав. кафедрой    Т. Ю. Бугакова")
+    add_right(doc, "«___» __________ 2026 г.")
     add_empty(doc)
-    add_h_center(doc, "ЗАДАНИЕ", bold=True)
-    add_h_center(doc, "НА ВЫПУСКНУЮ КВАЛИФИКАЦИОННУЮ РАБОТУ", bold=True)
+    add_center(doc, "ЗАДАНИЕ", bold=True)
+    add_center(doc, "НА ВЫПУСКНУЮ КВАЛИФИКАЦИОННУЮ РАБОТУ", bold=True)
     add_empty(doc)
-    add_para(doc, "Обучающемуся Енчу Роману Викторовичу", "Body Text")
-    add_para(doc, "Группа БИ-41 Институт геодезии и менеджмента", "Body Text")
-    add_para(doc, "Направление подготовки 09.03.02 – Информационные системы "
-             "и технологии", "Body Text")
-    add_para(doc, "Тема ВКР Разработка веб-сервиса для мониторинга "
-             "успеваемости с применением технологий искусственного интеллекта",
-             "Body Text")
-    add_para(doc, "Руководитель Басаргин Андрей Александрович", "Body Text")
-    add_para(doc, "Ученое звание, ученая степень руководителя доцент, к.т.н.",
-             "Body Text")
-    add_para(doc, "Место работы, должность руководителя СГУГиТ, доцент",
-             "Body Text")
+    add_body(doc, "Обучающемуся Енчу Роману Викторовичу")
+    add_body(doc, "Группа БИ-41  Институт геодезии и менеджмента")
+    add_body(doc, "Направление подготовки 09.03.02 – Информационные "
+             "системы и технологии")
+    add_body(doc, "Тема ВКР Разработка веб-сервиса для мониторинга "
+             "успеваемости с применением технологий искусственного "
+             "интеллекта")
+    add_body(doc, "Руководитель Басаргин Андрей Александрович")
+    add_body(doc, "Ученое звание, ученая степень руководителя "
+             "доцент, к.т.н.")
+    add_body(doc, "Место работы, должность руководителя СГУГиТ, доцент")
+    add_body(doc, "Срок сдачи полностью оформленного задания на кафедру")
     add_empty(doc)
-    add_para(doc, "Задание на ВКР (перечень рассматриваемых вопросов):",
-             "Body Text", bold=True)
+    add_body(doc, "Задание на ВКР (перечень рассматриваемых вопросов):")
     add_body(doc, "1. Провести анализ предметной области контроля знаний "
-             "в образовательном процессе и выявить ограничения существующих решений.")
-    add_body(doc, "2. Обосновать выбор программных средств и спроектировать "
-             "архитектуру веб-сервиса с использованием AI-модуля.")
+             "в образовательном процессе и выявить ограничения "
+             "существующих решений.")
+    add_body(doc, "2. Обосновать выбор программных средств и "
+             "спроектировать архитектуру веб-сервиса с использованием "
+             "AI-модуля.")
     add_body(doc, "3. Реализовать веб-сервис и продемонстрировать "
              "его работоспособность на реальных данных.")
-
+    add_body(doc, "4. Выполнить тестирование системы.")
     add_empty(doc)
-    add_para(doc, "Перечень графического материала с указанием основных чертежей "
-             "и (или) иллюстративного материала (формат А1): нет", "Body Text")
-    add_para(doc, "Исходные данные к ВКР: информационные, текстовые и графические "
-             "материалы по теме ВКР", "Body Text")
+    add_body(doc, "Перечень графического материала с указанием основных "
+             "чертежей и (или) иллюстративного материала "
+             "(формат А1): нет")
+    add_body(doc, "Исходные данные к ВКР: информационные, текстовые "
+             "и графические материалы по теме ВКР")
+
+    add_center(doc, "ГРАФИК ВЫПОЛНЕНИЯ ВКР", bold=True)
+    add_empty(doc)
+
+    schedule = doc.add_table(rows=8, cols=4)
+    sh = ["№ п/п", "Наименование этапа", "Срок выполнения",
+          "Отметка о выполнении"]
+    for i, h in enumerate(sh):
+        cell = schedule.rows[0].cells[i]
+        cell.text = h
+        for p in cell.paragraphs:
+            for rn in p.runs:
+                rn.bold = True
+    sched_data = [
+        ["1", "Обзор литературы и анализ предметной области",
+         "Сентябрь – Октябрь 2025", "Выполнено"],
+        ["2", "Формирование требований и проектирование",
+         "Ноябрь – Декабрь 2025", "Выполнено"],
+        ["3", "Выбор программных средств",
+         "Декабрь 2025 – Январь 2026", "Выполнено"],
+        ["4", "Реализация прототипа веб-сервиса",
+         "Январь – Март 2026", "Выполнено"],
+        ["5", "Тестирование и отладка",
+         "Март – Апрель 2026", "Выполнено"],
+        ["6", "Оформление пояснительной записки",
+         "Апрель – Май 2026", "Выполнено"],
+        ["7", "Подготовка к защите",
+         "Май – Июнь 2026", "Выполнено"],
+    ]
+    for ri, rd in enumerate(sched_data):
+        for ci, val in enumerate(rd):
+            schedule.rows[ri + 1].cells[ci].text = val
+    format_table(schedule, col_widths_cm=[1.5, 7.0, 5.0, 3.5])
+    add_empty(doc)
+
+    add_body(doc, "«___» __________ 2026 г.      Руководитель")
+    add_empty(doc)
+    add_body(doc, "Задание принял к исполнению и с графиком согласен")
 
     doc.add_page_break()
 
     # ── РЕФЕРАТ ────────────────────────────────────────────────
-    add_h_center(doc, "РЕФЕРАТ", bold=True)
+    add_center(doc, "РЕФЕРАТ", size=20, bold=True)
     add_empty(doc)
     add_body(doc,
         "Енчу Роман Викторович. Разработка веб-сервиса для мониторинга "
@@ -315,19 +409,13 @@ def main():
         "Место дипломирования: Сибирский государственный университет "
         "геосистем и технологий, кафедра прикладной информатики "
         "и информационных систем.")
-    add_body(doc, "Руководитель – канд. техн. наук, доцент СГУГиТ Басаргин А. А.")
-    add_body(doc, "2026 г., 09.03.02 «Информационные системы и технологии», "
-             "программа бакалавриата.")
-    add_body(doc, "80 с., 4 табл., 22 рис., 25 источников, 7 приложений.")
-
-    add_empty(doc)
-    p = add_para(doc, "", "!Ключевые слова")
-    r = p.add_run(
-        "ВЕБ-СЕРВИС, МОНИТОРИНГ УСПЕВАЕМОСТИ, ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ, "
-        "ГЕНЕРАЦИЯ ТЕСТОВ, FASTAPI, КОНТРОЛЬ ЗНАНИЙ, ОБРАЗОВАТЕЛЬНАЯ ПЛАТФОРМА, "
-        "РОЛЕВАЯ МОДЕЛЬ, АНАЛИТИКА УСПЕВАЕМОСТИ, QR-ДОСТУП"
-    )
-
+    add_body(doc,
+        "Руководитель – канд. техн. наук, доцент СГУГиТ Басаргин А. А.")
+    add_body(doc,
+        "2026 г., 09.03.02 «Информационные системы и технологии», "
+        "программа бакалавриата.")
+    add_body(doc,
+        "80 с., 2 табл., 28 рис., 25 источников, 7 приложений.")
     add_empty(doc)
     add_body(doc,
         "Целью выпускной квалификационной работы является разработка "
@@ -351,136 +439,154 @@ def main():
     doc.add_page_break()
 
     # ── ОГЛАВЛЕНИЕ ─────────────────────────────────────────────
-    add_h_center(doc, "ОГЛАВЛЕНИЕ", bold=True)
+    add_center(doc, "ОГЛАВЛЕНИЕ", size=20, bold=True)
     add_empty(doc)
-    # Insert a proper Word TOC field — clickable, auto-updatable
     add_toc_field(doc)
     doc.add_page_break()
 
-    # ── ВВЕДЕНИЕ ──────────────────────────────────────────────
-    add_h_center(doc, "ВВЕДЕНИЕ", bold=True)
+    # ══════════════════════════════════════════════════════════
+    #  ВВЕДЕНИЕ
+    # ══════════════════════════════════════════════════════════
+    add_heading1(doc, "ВВЕДЕНИЕ")
     add_empty(doc)
 
     add_body(doc,
         "Современный образовательный процесс в высших учебных заведениях "
         "предъявляет возрастающие требования к оперативности и объективности "
-        "контроля знаний обучающихся. Преподаватель, ведущий несколько дисциплин "
-        "для различных групп, вынужден регулярно формировать контрольно-оценочные "
-        "материалы, обеспечивать их методическую корректность и впоследствии "
-        "интерпретировать накопленные результаты тестирования.")
+        "контроля знаний обучающихся. Преподаватель, ведущий несколько "
+        "дисциплин для различных групп, вынужден регулярно формировать "
+        "контрольно-оценочные материалы, обеспечивать их методическую "
+        "корректность и впоследствии интерпретировать накопленные "
+        "результаты тестирования.")
 
     add_body(doc,
-        "Практика показывает, что значительная часть этих операций до сих пор "
-        "выполняется вручную: преподаватель составляет тестовые вопросы "
-        "в текстовом редакторе, дублирует их в систему дистанционного обучения, "
-        "затем собирает ответы студентов и формирует ведомости. Каждый этап "
-        "требует дополнительных временных затрат и сопряжён с риском "
-        "методических ошибок, связанных с рассогласованием контента лекции "
-        "и тестового задания.")
+        "Практика показывает, что значительная часть этих операций "
+        "до сих пор выполняется вручную: преподаватель составляет "
+        "тестовые вопросы в текстовом редакторе, дублирует их "
+        "в систему дистанционного обучения, затем собирает ответы "
+        "студентов и формирует ведомости. Каждый этап требует "
+        "дополнительных временных затрат и сопряжён с риском "
+        "методических ошибок, связанных с рассогласованием контента "
+        "лекции и тестового задания.")
 
     add_body(doc,
         "Существующие на рынке решения разделяются на две категории. "
-        "Универсальные системы управления обучением (LMS), такие как Moodle, "
-        "обеспечивают широкий набор функций, однако требуют значительных "
-        "усилий на настройку и избыточны для задачи сопровождения отдельной "
-        "дисциплины. Упрощённые инструменты — Google Forms, Яндекс.Формы — "
-        "не поддерживают привязку тестов к лекционному материалу и не "
-        "предоставляют предметной аналитики. Специализированные платформы "
-        "вроде Stepik ориентированы на формат онлайн-курсов и не учитывают "
-        "специфику контроля знаний на занятии.")
+        "Универсальные системы управления обучением (LMS), такие как "
+        "Moodle, обеспечивают широкий набор функций, однако требуют "
+        "значительных усилий на настройку и избыточны для задачи "
+        "сопровождения отдельной дисциплины. Упрощённые инструменты — "
+        "Google Forms, Яндекс.Формы — не поддерживают привязку тестов "
+        "к лекционному материалу и не предоставляют предметной аналитики. "
+        "Специализированные платформы вроде Stepik ориентированы на "
+        "формат онлайн-курсов и не учитывают специфику контроля знаний "
+        "на занятии.")
 
     add_body(doc,
-        "Актуальность данной работы определяется потребностью преподавателей "
-        "в специализированном инструменте, который объединяет подготовку "
-        "контрольно-оценочных материалов, их публикацию и последующий "
-        "анализ результатов в рамках единого цифрового контура. Применение "
-        "технологий искусственного интеллекта для автоматизации генерации "
-        "тестовых вопросов по лекционному материалу позволяет существенно "
-        "сократить трудоёмкость подготовительного этапа.")
+        "Актуальность данной работы определяется потребностью "
+        "преподавателей в специализированном инструменте, который "
+        "объединяет подготовку контрольно-оценочных материалов, "
+        "их публикацию и последующий анализ результатов в рамках "
+        "единого цифрового контура. Применение технологий искусственного "
+        "интеллекта для автоматизации генерации тестовых вопросов "
+        "по лекционному материалу позволяет существенно сократить "
+        "трудоёмкость подготовительного этапа.")
 
     add_body(doc,
         "Объектом исследования является процесс контроля знаний "
-        "обучающихся в высшем учебном заведении. Предметом исследования "
-        "выступает автоматизация формирования тестов, публикации доступа "
-        "и мониторинга успеваемости с применением веб-технологий "
-        "и средств искусственного интеллекта.")
+        "обучающихся в высшем учебном заведении. Предметом "
+        "исследования выступает автоматизация формирования тестов, "
+        "публикации доступа и мониторинга успеваемости с применением "
+        "веб-технологий и средств искусственного интеллекта.")
 
     add_body(doc,
         "Целью выпускной квалификационной работы является разработка "
-        "веб-сервиса для мониторинга успеваемости с применением технологий "
-        "искусственного интеллекта, обеспечивающего сквозной цифровой контур "
-        "контроля знаний и снижающего трудоёмкость сопровождения дисциплины "
-        "для преподавателя.")
+        "веб-сервиса для мониторинга успеваемости с применением "
+        "технологий искусственного интеллекта, обеспечивающего "
+        "сквозной цифровой контур контроля знаний и снижающего "
+        "трудоёмкость сопровождения дисциплины для преподавателя.")
 
-    add_body(doc, "Для достижения поставленной цели определены следующие задачи:")
+    add_body(doc,
+        "Для достижения поставленной цели определены следующие задачи:")
     tasks = [
-        "проанализировать предметную область контроля знаний в образовательном "
-        "процессе и выявить ограничения существующих решений;",
-        "сформировать требования к веб-сервису, определить роли пользователей "
-        "и ключевые сценарии использования;",
-        "спроектировать функциональные, процессные и информационно-логические "
-        "модели предметной области с использованием нотации UML;",
-        "обосновать выбор программных средств и технологического стека;",
-        "реализовать веб-прототип с ролями преподавателя, студента "
-        "и администратора, интегрировав AI-модуль генерации тестов;",
-        "выполнить тестирование системы и подготовить демонстрационный стенд "
+        "анализ предметной области контроля знаний в образовательном "
+        "процессе и выявление ограничений существующих решений;",
+        "формирование требований к веб-сервису, определение ролей "
+        "пользователей и ключевых сценариев использования;",
+        "проектирование функциональных, процессных "
+        "и информационно-логических моделей предметной области "
+        "с использованием нотации UML;",
+        "обоснование выбора программных средств и технологического стека;",
+        "реализация веб-прототипа с ролями преподавателя, студента "
+        "и администратора, интеграция AI-модуля генерации тестов;",
+        "тестирование системы и подготовка демонстрационного стенда "
         "на реальных данных."
     ]
     for t in tasks:
-        add_body(doc, f"– {t}")
+        add_list_item(doc, t)
 
     add_body(doc,
         "Практическая значимость работы состоит в создании готового "
         "к эксплуатации веб-сервиса «КампусПлюс», развёрнутого "
-        "на публичном сервере и доступного по адресу campusplus.onrender.com. "
-        "Сервис апробирован на данных кафедры прикладной информатики "
-        "и информационных систем СГУГиТ.")
-
-    doc.add_page_break()
+        "на публичном сервере и доступного по адресу "
+        "campusplus.onrender.com. Сервис апробирован на данных кафедры "
+        "прикладной информатики и информационных систем СГУГиТ.")
 
     # ══════════════════════════════════════════════════════════
-    # РАЗДЕЛ 1
+    #  РАЗДЕЛ 1
     # ══════════════════════════════════════════════════════════
     add_heading1(doc, "1 АНАЛИЗ ПРЕДМЕТНОЙ ОБЛАСТИ")
 
     # ── 1.1 ──
-    add_heading2(doc, "1.1 Характеристика образовательного контроля знаний")
+    add_heading2(doc,
+        "1.1 Характеристика образовательного контроля знаний")
 
     add_body(doc,
-        "Контроль знаний в высшем учебном заведении представляет собой "
-        "систематический процесс проверки степени усвоения учебного "
-        "материала обучающимися. Данный процесс включает в себя несколько "
-        "последовательных этапов: формирование контрольно-оценочных материалов, "
-        "проведение контрольного мероприятия, сбор и обработку результатов, "
-        "а также интерпретацию полученных данных в целях принятия методических "
-        "решений.")
+        "Контроль знаний в высшем учебном заведении представляет "
+        "собой систематический процесс проверки степени усвоения "
+        "учебного материала обучающимися. Данный процесс включает "
+        "несколько последовательных этапов: формирование "
+        "контрольно-оценочных материалов, проведение контрольного "
+        "мероприятия, сбор и обработку результатов, а также "
+        "интерпретацию полученных данных в целях принятия "
+        "методических решений.")
 
     add_body(doc,
         "В контексте данной работы рассматривается текущий контроль "
-        "знаний, осуществляемый преподавателем в ходе учебного семестра. "
-        "Типичный сценарий предполагает, что преподаватель проводит лекцию "
-        "по определённой теме, затем формирует набор тестовых вопросов "
-        "для проверки усвоения материала, публикует доступ к тесту "
-        "и по результатам прохождения оценивает уровень подготовки "
-        "обучающихся.")
+        "знаний, осуществляемый преподавателем в ходе учебного "
+        "семестра. Типичный сценарий предполагает, что преподаватель "
+        "проводит лекцию по определённой теме, затем формирует набор "
+        "тестовых вопросов для проверки усвоения материала, публикует "
+        "доступ к тесту и по результатам прохождения оценивает "
+        "уровень подготовки обучающихся.")
 
     add_body(doc,
-        "В рамках кафедры прикладной информатики и информационных систем "
-        "СГУГиТ преподаватели работают с несколькими дисциплинами одновременно, "
-        "каждая из которых закреплена за определёнными учебными группами. "
-        "При этом преподаватель выполняет ряд повторяющихся операций: "
-        "подготовка содержания тестового задания, проверка корректности "
-        "формулировок вопросов, контроль соответствия вопросов содержанию "
-        "лекции и анализ полученных результатов. Автоматизация указанных "
-        "операций позволяет снизить трудоёмкость сопровождения дисциплины "
-        "и повысить оперативность обратной связи.")
+        "В рамках кафедры прикладной информатики и информационных "
+        "систем СГУГиТ преподаватели работают с несколькими "
+        "дисциплинами одновременно, каждая из которых закреплена "
+        "за определёнными учебными группами. При этом преподаватель "
+        "выполняет ряд повторяющихся операций: подготовка содержания "
+        "тестового задания, проверка корректности формулировок "
+        "вопросов, контроль соответствия вопросов содержанию лекции "
+        "и анализ полученных результатов. Автоматизация указанных "
+        "операций позволяет снизить трудоёмкость сопровождения "
+        "дисциплины и повысить оперативность обратной связи.")
 
     add_body(doc,
         "Помимо преподавателя, в процессе контроля знаний участвуют "
-        "обучающиеся, которые проходят тесты и получают обратную связь "
-        "о своих результатах, а также администраторы образовательного "
-        "процесса, обеспечивающие управление учётными записями, "
-        "группами и назначениями преподавателей на дисциплины.")
+        "обучающиеся, которые проходят тесты и получают обратную "
+        "связь о своих результатах, а также администраторы "
+        "образовательного процесса, обеспечивающие управление "
+        "учётными записями, группами и назначениями преподавателей "
+        "на дисциплины.")
+
+    add_body(doc,
+        "Современные подходы к контролю знаний предполагают "
+        "использование цифровых инструментов, обеспечивающих "
+        "оперативную фиксацию результатов и формирование обратной "
+        "связи. Вместе с тем внедрение таких инструментов зачастую "
+        "сопряжено с необходимостью обучения преподавателей работе "
+        "с новыми системами, что создаёт дополнительный барьер "
+        "для их применения.")
 
     # ── 1.2 ──
     add_heading2(doc,
@@ -494,32 +600,44 @@ def main():
         "Данный цикл включает следующие этапы:")
 
     steps = [
-        "подготовка лекционного материала в текстовом или презентационном формате;",
-        "создание тестового задания на основе содержания прочитанной лекции;",
+        "подготовка лекционного материала в текстовом "
+        "или презентационном формате;",
+        "создание тестового задания на основе содержания "
+        "прочитанной лекции;",
         "публикация теста и обеспечение доступа обучающихся к нему;",
         "сбор ответов и формирование оценочной ведомости;",
         "анализ результатов с целью выявления проблемных тем."
     ]
-    for i, s in enumerate(steps, 1):
-        add_body(doc, f"{i}) {s}")
+    for s in steps:
+        add_list_item(doc, s)
 
     add_body(doc,
         "На практике перечисленные этапы реализуются с использованием "
-        "разрозненных инструментов. Лекционный материал хранится в текстовом "
-        "редакторе или системе электронного документооборота, тестовые "
-        "вопросы формируются в Google Forms или в модуле LMS, результаты "
-        "собираются вручную или экспортируются в табличный формат. "
-        "Отсутствие единого цифрового контура приводит к потере контекста "
-        "и затрудняет формирование предметной аналитики.")
+        "разрозненных инструментов. Лекционный материал хранится "
+        "в текстовом редакторе или системе электронного "
+        "документооборота, тестовые вопросы формируются в Google "
+        "Forms или в модуле LMS, результаты собираются вручную "
+        "или экспортируются в табличный формат. Отсутствие единого "
+        "цифрового контура приводит к потере контекста и затрудняет "
+        "формирование предметной аналитики.")
 
     add_body(doc,
-        "Существенным ограничением является ручная подготовка тестовых "
-        "вопросов. Преподаватель вынужден самостоятельно формулировать "
-        "каждый вопрос, подбирать варианты ответов и контролировать "
-        "методическую корректность итогового задания. Данная операция "
-        "занимает значительную часть рабочего времени и может быть "
-        "частично автоматизирована с помощью технологий обработки "
-        "естественного языка.")
+        "Существенным ограничением является ручная подготовка "
+        "тестовых вопросов. Преподаватель вынужден самостоятельно "
+        "формулировать каждый вопрос, подбирать варианты ответов "
+        "и контролировать методическую корректность итогового "
+        "задания. Данная операция занимает значительную часть "
+        "рабочего времени и может быть частично автоматизирована "
+        "с помощью технологий обработки естественного языка.")
+
+    add_body(doc,
+        "Кроме того, при использовании разрозненных инструментов "
+        "преподаватель лишается возможности сквозного анализа "
+        "результатов в привязке к конкретным темам лекций. "
+        "Для формирования такой аналитики необходимо, чтобы тест, "
+        "лекция и дисциплина были связаны на уровне информационной "
+        "модели, а результаты прохождения накапливались в единой "
+        "базе данных.")
 
     # ── 1.3 ──
     add_heading2(doc,
@@ -527,42 +645,44 @@ def main():
 
     add_body(doc,
         "Проведённый анализ рабочего цикла преподавателя позволяет "
-        "зафиксировать ряд ключевых проблем, определяющих необходимость "
-        "разработки специализированного решения:")
+        "зафиксировать ряд ключевых проблем, определяющих "
+        "необходимость разработки специализированного решения:")
 
     problems = [
-        ("Ручное создание тестов", "Преподаватель формирует банк "
-         "вопросов вручную, подбирает варианты ответов и контролирует "
-         "соответствие содержанию лекции."),
-        ("Повторная валидация", "Даже после составления теста "
-         "сохраняется необходимость проверки правильных ответов, "
-         "полноты покрытия темы и корректности формулировок."),
-        ("Разрозненность инструментов", "Учебный материал, тестирование "
-         "и аналитика распределены по различным системам, вследствие чего "
-         "утрачивается единый контекст сопровождения дисциплины."),
-        ("Недостаток аналитики", "При отсутствии единого цифрового "
-         "контура затрудняется оперативное выявление проблемных тем, "
-         "слабых групп и обучающихся, которым необходима дополнительная "
-         "методическая поддержка."),
+        "Ручное создание тестов. Преподаватель формирует банк "
+        "вопросов вручную, подбирает варианты ответов и контролирует "
+        "соответствие содержанию лекции.",
+        "Повторная валидация. Даже после составления теста "
+        "сохраняется необходимость проверки правильных ответов, "
+        "полноты покрытия темы и корректности формулировок.",
+        "Разрозненность инструментов. Учебный материал, тестирование "
+        "и аналитика распределены по различным системам, вследствие "
+        "чего утрачивается единый контекст сопровождения дисциплины.",
+        "Недостаток аналитики. При отсутствии единого цифрового "
+        "контура затрудняется оперативное выявление проблемных тем, "
+        "слабых групп и обучающихся, которым необходима дополнительная "
+        "методическая поддержка.",
     ]
-    for title, desc in problems:
-        add_body(doc, f"{title}. {desc}")
+    for pr in problems:
+        add_list_item(doc, pr)
 
     add_body(doc,
         "Указанные проблемы определяют потребность в веб-сервисе, "
         "реализующем единый прикладной маршрут преподавателя: "
         "дисциплина → лекция → генерация или ручное создание теста → "
-        "публикация → прохождение студентом → аналитика и точки роста. "
-        "Такой подход позволяет сохранить предметный контекст на всех "
-        "этапах работы и обеспечить интерпретируемую обратную связь.")
+        "публикация → прохождение студентом → аналитика и точки "
+        "роста. Такой подход позволяет сохранить предметный контекст "
+        "на всех этапах работы и обеспечить интерпретируемую "
+        "обратную связь.")
 
     # ── 1.4 ──
     add_heading2(doc,
         "1.4 Определение требований и постановка задач")
 
     add_body(doc,
-        "На основании проведённого анализа сформулированы функциональные "
-        "и нефункциональные требования к разрабатываемой системе.")
+        "На основании проведённого анализа сформулированы "
+        "функциональные и нефункциональные требования "
+        "к разрабатываемой системе.")
 
     add_body(doc, "Функциональные требования:")
     func_reqs = [
@@ -570,8 +690,10 @@ def main():
         "студент, администратор;",
         "создание и редактирование дисциплин, лекций, тестов "
         "и вопросов к ним;",
-        "автоматическая генерация тестовых вопросов по тексту лекции "
-        "с использованием AI-модуля;",
+        "автоматическая генерация тестовых вопросов по тексту "
+        "лекции с использованием AI-модуля;",
+        "ручное создание и редактирование тестов через конструктор "
+        "с поддержкой произвольного числа вариантов ответа;",
         "публикация тестов с выдачей QR-кода для быстрого доступа "
         "на занятии;",
         "прохождение тестов обучающимися с немедленной фиксацией "
@@ -584,11 +706,12 @@ def main():
         "и назначениями преподавателей на дисциплины."
     ]
     for r in func_reqs:
-        add_body(doc, f"– {r}")
+        add_list_item(doc, r)
 
     add_body(doc, "Нефункциональные требования:")
     nonfunc = [
-        "веб-интерфейс, адаптированный для десктопных и мобильных устройств;",
+        "веб-интерфейс, адаптированный для десктопных и мобильных "
+        "устройств;",
         "время отклика страницы не более 2 секунд при типовой нагрузке;",
         "защита от несанкционированного доступа: разграничение ролей, "
         "сессионная авторизация, защита от CSRF-атак;",
@@ -596,7 +719,7 @@ def main():
         "с использованием Nginx в качестве reverse-proxy."
     ]
     for r in nonfunc:
-        add_body(doc, f"– {r}")
+        add_list_item(doc, r)
 
     # ── 1.5 ──
     add_heading2(doc, "1.5 Анализ существующих разработок")
@@ -611,11 +734,12 @@ def main():
         "во многих вузах. Система предоставляет обширный набор "
         "инструментов: курсы, тесты, задания, форумы, журналы оценок. "
         "Вместе с тем Moodle отличается высокой сложностью настройки, "
-        "избыточной для задач оперативного контроля знаний. Связь тестов "
-        "с лекционным материалом реализована лишь частично: тест может "
-        "быть привязан к разделу курса, однако прямая генерация вопросов "
-        "по содержанию лекции отсутствует. Аналитика доступна, но "
-        "перегружена второстепенными показателями.")
+        "избыточной для задач оперативного контроля знаний. Связь "
+        "тестов с лекционным материалом реализована лишь частично: "
+        "тест может быть привязан к разделу курса, однако прямая "
+        "генерация вопросов по содержанию лекции отсутствует. "
+        "Аналитика доступна, но перегружена второстепенными "
+        "показателями.")
 
     add_body(doc,
         "Google Forms — инструмент создания онлайн-форм, нередко "
@@ -631,31 +755,39 @@ def main():
         "формат массовых открытых курсов. Система предлагает "
         "встроенный механизм создания тестов, однако её архитектура "
         "строится вокруг понятия курса, а не дисциплины со связанными "
-        "группами и преподавателями. QR-доступ на занятии и оперативная "
-        "аналитика по конкретной группе не предусмотрены.")
+        "группами и преподавателями. QR-доступ на занятии "
+        "и оперативная аналитика по конкретной группе не предусмотрены.")
 
-    # Table of comparison
+    add_body(doc,
+        "Результаты сравнительного анализа представлены в таблице 1.")
+
+    # Table 1 — comparison
+    add_center(doc, "Таблица 1 – Сравнительная таблица "
+               "существующих решений")
     table = doc.add_table(rows=7, cols=5)
-    headers = ["Критерий", "Moodle", "Google Forms", "Stepik", "КампусПлюс"]
+    headers = ["Критерий", "Moodle", "Google Forms", "Stepik",
+               "КампусПлюс"]
     for i, h in enumerate(headers):
         cell = table.rows[0].cells[i]
         cell.text = h
         for p in cell.paragraphs:
-            for r in p.runs:
-                r.bold = True
-
+            for rn in p.runs:
+                rn.bold = True
     data = [
-        ["Связь тестов с лекциями", "Частично", "Нет", "Частично", "Да"],
+        ["Связь тестов с лекциями", "Частично", "Нет",
+         "Частично", "Да"],
         ["AI-генерация вопросов", "Нет", "Нет", "Нет", "Да"],
-        ["Ручной конструктор тестов", "Да", "Базовый", "Ограничен", "Да"],
+        ["Ручной конструктор тестов", "Да", "Базовый",
+         "Ограничен", "Да"],
         ["QR-доступ на занятии", "Нет", "Нет", "Нет", "Да"],
-        ["Аналитика по дисциплине и группе", "Перегружена", "Нет", "Курсоцентрично", "Да"],
-        ["Быстрый сценарий для преподавателя", "Требует настройки", "Упрощён", "Курсоцентрично", "Да"],
+        ["Аналитика по дисциплине и группе", "Перегружена",
+         "Нет", "Курсоцентрично", "Да"],
+        ["Быстрый сценарий для преподавателя", "Требует настройки",
+         "Упрощён", "Курсоцентрично", "Да"],
     ]
-    for ri, row_data in enumerate(data):
-        for ci, val in enumerate(row_data):
+    for ri, rd in enumerate(data):
+        for ci, val in enumerate(rd):
             table.rows[ri + 1].cells[ci].text = val
-
     format_table(table, col_widths_cm=[4.5, 3.0, 3.0, 3.0, 3.0])
     add_empty(doc)
 
@@ -665,14 +797,12 @@ def main():
         "прикладного маршрута преподавателя, объединяющего подготовку "
         "контрольно-оценочных материалов, публикацию доступа, "
         "автоматическую генерацию вопросов и предметную аналитику. "
-        "Данное обстоятельство обосновывает целесообразность разработки "
-        "собственного веб-сервиса.")
-
-    add_para(doc, "Рисунок 1 – Сравнительная таблица существующих решений",
-             "!Рисунки и подписи к ним")
+        "Данное обстоятельство обосновывает целесообразность "
+        "разработки собственного веб-сервиса.")
 
     # ── 1.6 ──
     add_heading2(doc, "1.6 Выводы по первому разделу")
+
     add_body(doc,
         "В первом разделе выполнен анализ предметной области контроля "
         "знаний в образовательном процессе. Описаны типичные операции "
@@ -682,6 +812,7 @@ def main():
         "универсальных LMS, отсутствие связи тестов с лекционным "
         "материалом в упрощённых инструментах, а также невозможность "
         "автоматической генерации вопросов.")
+
     add_body(doc,
         "Сформулированы функциональные и нефункциональные требования "
         "к разрабатываемому веб-сервису. Обоснована необходимость "
@@ -691,102 +822,122 @@ def main():
     doc.add_page_break()
 
     # ══════════════════════════════════════════════════════════
-    # РАЗДЕЛ 2
+    #  РАЗДЕЛ 2
     # ══════════════════════════════════════════════════════════
     add_heading1(doc, "2 ОБЗОР ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ")
 
     # ── 2.1 ──
-    add_heading2(doc, "2.1 Выбор языка программирования и фреймворка")
+    add_heading2(doc,
+        "2.1 Выбор языка программирования и фреймворка")
 
     add_body(doc,
         "При выборе языка программирования для реализации серверной "
-        "части веб-сервиса рассматривались Python, JavaScript (Node.js) "
-        "и C#. Каждый из языков обладает развитой экосистемой "
-        "веб-фреймворков и средствами работы с базами данных.")
+        "части веб-сервиса рассматривались Python, JavaScript "
+        "(Node.js) и C#. Каждый из языков обладает развитой "
+        "экосистемой веб-фреймворков и средствами работы с базами "
+        "данных.")
 
     add_body(doc,
         "Python был выбран в качестве основного языка разработки "
         "по следующим причинам. Во-первых, Python обеспечивает "
         "прямую интеграцию с библиотеками машинного обучения "
-        "и обработки естественного языка, что критично для реализации "
-        "AI-модуля генерации тестовых вопросов. Во-вторых, экосистема "
-        "Python включает специализированные асинхронные фреймворки, "
-        "поддерживающие серверный рендеринг HTML-шаблонов. В-третьих, "
-        "Python является наиболее распространённым языком на кафедре "
-        "прикладной информатики СГУГиТ, что упрощает последующее "
-        "сопровождение проекта.")
+        "и обработки естественного языка, что критично для "
+        "реализации AI-модуля генерации тестовых вопросов. "
+        "Во-вторых, экосистема Python включает специализированные "
+        "асинхронные фреймворки, поддерживающие серверный рендеринг "
+        "HTML-шаблонов. В-третьих, Python является наиболее "
+        "распространённым языком на кафедре прикладной информатики "
+        "СГУГиТ, что упрощает последующее сопровождение проекта.")
 
     add_body(doc,
-        "Среди веб-фреймворков Python рассматривались Django и FastAPI. "
-        "Django представляет собой зрелый фреймворк с встроенной ORM, "
-        "административной панелью и системой миграций. Однако для данного "
-        "проекта Django избыточен: встроенная ORM не требуется при "
-        "использовании прямого доступа к SQLite/PostgreSQL, а административная "
-        "панель заменяется собственным интерфейсом администратора.")
+        "Среди веб-фреймворков Python рассматривались Django "
+        "и FastAPI. Django представляет собой зрелый фреймворк "
+        "с встроенной ORM, административной панелью и системой "
+        "миграций. Однако для данного проекта Django избыточен: "
+        "встроенная ORM не требуется при использовании прямого "
+        "доступа к SQLite/PostgreSQL, а административная панель "
+        "заменяется собственным интерфейсом администратора.")
 
     add_body(doc,
-        "FastAPI выбран в качестве основного фреймворка. Его ключевые "
-        "преимущества для данного проекта: нативная асинхронная обработка "
-        "запросов (необходима для параллельного обслуживания пользователей "
-        "и фоновых AI-вызовов), встроенная поддержка Jinja2-шаблонов "
-        "для серверного рендеринга, автоматическая генерация OpenAPI-документации "
-        "и минимальная избыточность для MVP.")
+        "FastAPI выбран в качестве основного фреймворка. Его "
+        "ключевые преимущества для данного проекта: нативная "
+        "асинхронная обработка запросов (необходима для параллельного "
+        "обслуживания пользователей и фоновых AI-вызовов), встроенная "
+        "поддержка Jinja2-шаблонов для серверного рендеринга, "
+        "автоматическая генерация OpenAPI-документации и минимальная "
+        "избыточность для MVP.")
 
-    # Comparison table
+    add_body(doc,
+        "Результаты сравнения фреймворков приведены в таблице 2.")
+
+    # Table 2 — frameworks
+    add_center(doc, "Таблица 2 – Сравнительная таблица фреймворков")
     table2 = doc.add_table(rows=6, cols=5)
-    h2 = ["Критерий", "Django", "Node.js + Express", "ASP.NET Core", "FastAPI"]
+    h2 = ["Критерий", "Django", "Node.js + Express",
+          "ASP.NET Core", "FastAPI"]
     for i, h in enumerate(h2):
         table2.rows[0].cells[i].text = h
         for p in table2.rows[0].cells[i].paragraphs:
-            for r in p.runs:
-                r.bold = True
+            for rn in p.runs:
+                rn.bold = True
     d2 = [
-        ["Скорость старта проекта", "Средняя", "Средняя", "Средняя", "Высокая"],
-        ["Интеграция с Python AI", "Да", "Ограничено", "Ограничено", "Да"],
+        ["Скорость старта проекта", "Средняя", "Средняя",
+         "Средняя", "Высокая"],
+        ["Интеграция с Python AI", "Да", "Ограничено",
+         "Ограничено", "Да"],
         ["Асинхронная обработка", "Частично", "Да", "Да", "Да"],
-        ["Серверный HTML", "Да", "Через шаблоны", "Через Razor", "Да"],
-        ["Избыточность для MVP", "Высокая", "Зависит от стека", "Высокая", "Оптимальная"],
+        ["Серверный HTML", "Да", "Через шаблоны",
+         "Через Razor", "Да"],
+        ["Избыточность для MVP", "Высокая",
+         "Зависит от стека", "Высокая", "Оптимальная"],
     ]
-    for ri, row_data in enumerate(d2):
-        for ci, val in enumerate(row_data):
+    for ri, rd in enumerate(d2):
+        for ci, val in enumerate(rd):
             table2.rows[ri + 1].cells[ci].text = val
-
     format_table(table2, col_widths_cm=[4.5, 3.0, 3.0, 3.0, 3.0])
     add_empty(doc)
-    add_para(doc, "Рисунок 2 – Сравнительная таблица фреймворков",
-             "!Рисунки и подписи к ним")
 
     add_body(doc,
-        "Дополнительно в проекте используются следующие технологии: "
-        "Jinja2 — шаблонизатор для серверного рендеринга HTML-страниц; "
-        "Uvicorn — ASGI-сервер для обработки асинхронных запросов; "
-        "HTML, CSS и JavaScript — клиентская часть интерфейса; "
-        "SessionMiddleware — механизм управления пользовательскими сессиями; "
+        "Дополнительно в проекте используются следующие технологии:")
+    tech_list = [
+        "Jinja2 — шаблонизатор для серверного рендеринга "
+        "HTML-страниц;",
+        "Uvicorn — ASGI-сервер для обработки асинхронных запросов;",
+        "HTML, CSS и JavaScript — клиентская часть интерфейса;",
+        "SessionMiddleware — механизм управления пользовательскими "
+        "сессиями;",
         "OpenAI API — интерфейс взаимодействия с языковой моделью "
-        "для генерации тестовых вопросов.")
+        "для генерации тестовых вопросов."
+    ]
+    for t in tech_list:
+        add_list_item(doc, t)
 
     # ── 2.2 ──
-    add_heading2(doc, "2.2 Выбор системы управления базами данных")
+    add_heading2(doc,
+        "2.2 Выбор системы управления базами данных")
 
     add_body(doc,
         "При выборе системы управления базами данных (СУБД) "
-        "рассматривались SQLite и PostgreSQL. Оба варианта относятся "
-        "к реляционным СУБД и поддерживают стандартный SQL-синтаксис.")
+        "рассматривались SQLite и PostgreSQL. Оба варианта "
+        "относятся к реляционным СУБД и поддерживают стандартный "
+        "SQL-синтаксис.")
 
     add_body(doc,
         "SQLite выбран для локальной разработки и тестирования. "
-        "Его ключевое преимущество — отсутствие необходимости установки "
-        "отдельного серверного процесса: база данных хранится в одном файле "
-        "и не требует сетевого подключения. Это существенно упрощает "
-        "развёртывание на рабочей станции разработчика и позволяет "
-        "запускать автоматизированные тесты без внешних зависимостей.")
+        "Его ключевое преимущество — отсутствие необходимости "
+        "установки отдельного серверного процесса: база данных "
+        "хранится в одном файле и не требует сетевого подключения. "
+        "Это существенно упрощает развёртывание на рабочей станции "
+        "разработчика и позволяет запускать автоматизированные тесты "
+        "без внешних зависимостей.")
 
     add_body(doc,
-        "PostgreSQL используется в продуктивной среде. СУБД обеспечивает "
-        "поддержку одновременной работы нескольких пользователей, "
-        "транзакционную целостность и масштабируемость при росте "
-        "объёма данных. Развёртывание PostgreSQL на облачной платформе "
-        "Render осуществляется штатными средствами провайдера.")
+        "PostgreSQL используется в продуктивной среде. СУБД "
+        "обеспечивает поддержку одновременной работы нескольких "
+        "пользователей, транзакционную целостность "
+        "и масштабируемость при росте объёма данных. Развёртывание "
+        "PostgreSQL на облачной платформе Render осуществляется "
+        "штатными средствами провайдера.")
 
     add_body(doc,
         "Архитектурное решение проекта предусматривает работу "
@@ -801,28 +952,30 @@ def main():
 
     add_body(doc,
         "Модуль автоматической генерации тестовых вопросов является "
-        "одной из ключевых функциональных особенностей разрабатываемого "
-        "веб-сервиса. Для его реализации исследованы подходы к генерации "
-        "вопросов на основе текста лекции.")
+        "одной из ключевых функциональных особенностей "
+        "разрабатываемого веб-сервиса. Для его реализации исследованы "
+        "подходы к генерации вопросов на основе текста лекции.")
 
     add_body(doc,
-        "Среди рассмотренных подходов: rule-based (шаблонная генерация "
-        "на основе морфологического разбора предложений), fine-tuned модели "
-        "(дообученные языковые модели на корпусе образовательных материалов) "
-        "и промптинг больших языковых моделей (LLM). Для данного проекта "
-        "выбран подход промптинга LLM через OpenAI API (модель GPT-4.1) "
-        "по следующим причинам:")
+        "Среди рассмотренных подходов: rule-based (шаблонная "
+        "генерация на основе морфологического разбора предложений), "
+        "fine-tuned модели (дообученные языковые модели на корпусе "
+        "образовательных материалов) и промптинг больших языковых "
+        "моделей (LLM). Для данного проекта выбран подход промптинга "
+        "LLM через OpenAI API (модель GPT-4.1) по следующим причинам:")
 
     ai_reasons = [
-        "отсутствие необходимости в сборе и разметке обучающего датасета;",
-        "высокое качество генерируемых вопросов за счёт предварительного "
-        "обучения модели на обширном корпусе текстов;",
+        "отсутствие необходимости в сборе и разметке обучающего "
+        "датасета;",
+        "высокое качество генерируемых вопросов за счёт "
+        "предварительного обучения модели на обширном корпусе "
+        "текстов;",
         "возможность гибкой настройки формата вопросов через промпт "
         "(количество вариантов ответа, уровень сложности, язык);",
         "поддержка русскоязычного лекционного материала."
     ]
     for r in ai_reasons:
-        add_body(doc, f"– {r}")
+        add_list_item(doc, r)
 
     add_body(doc,
         "Взаимодействие с AI-провайдером реализовано в модуле ai.py. "
@@ -833,94 +986,108 @@ def main():
         "корректности индекса правильного ответа) и предоставляются "
         "преподавателю для редактирования перед публикацией теста.")
 
+    add_body(doc,
+        "Помимо промптинга, модуль ai.py реализует обработку "
+        "ошибок: при превышении лимита запросов или недоступности "
+        "провайдера система информирует преподавателя и предлагает "
+        "воспользоваться ручным конструктором тестов. Такой подход "
+        "обеспечивает отказоустойчивость функции генерации.")
+
     # ── 2.4 ──
     add_heading2(doc, "2.4 Выводы по второму разделу")
+
     add_body(doc,
         "Во втором разделе обоснован выбор программных средств для "
         "реализации веб-сервиса. В качестве языка программирования "
-        "выбран Python, в качестве веб-фреймворка — FastAPI. Для хранения "
-        "данных используются SQLite (разработка) и PostgreSQL (продуктивная "
-        "среда). Модуль генерации тестовых вопросов реализован с "
-        "использованием OpenAI API (GPT-4.1). Выбранный технологический "
-        "стек обеспечивает баланс между скоростью разработки, "
-        "интеграцией AI-модуля и готовностью к промышленной эксплуатации.")
+        "выбран Python, в качестве веб-фреймворка — FastAPI. Для "
+        "хранения данных используются SQLite (разработка) "
+        "и PostgreSQL (продуктивная среда). Модуль генерации "
+        "тестовых вопросов реализован с использованием OpenAI API "
+        "(GPT-4.1). Выбранный технологический стек обеспечивает "
+        "баланс между скоростью разработки, интеграцией AI-модуля "
+        "и готовностью к промышленной эксплуатации.")
 
     doc.add_page_break()
 
     # ══════════════════════════════════════════════════════════
-    # РАЗДЕЛ 3
+    #  РАЗДЕЛ 3
     # ══════════════════════════════════════════════════════════
     add_heading1(doc,
         "3 РАЗРАБОТКА ВЕБ-СЕРВИСА ДЛЯ МОНИТОРИНГА УСПЕВАЕМОСТИ "
         "С ПРИМЕНЕНИЕМ ТЕХНОЛОГИЙ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА")
 
     # ── 3.1 ──
-    add_heading2(doc, "3.1 Проектирование функциональной модели системы")
+    add_heading2(doc,
+        "3.1 Проектирование функциональной модели системы")
 
     add_body(doc,
-        "Проектирование функциональной модели выполнено с использованием "
-        "нотации UML (Unified Modeling Language). Построены четыре типа "
-        "диаграмм: диаграмма прецедентов, диаграмма классов, диаграмма "
-        "последовательностей и диаграмма активности. Каждая диаграмма "
-        "описывает отдельный аспект проектируемой системы.")
+        "Проектирование функциональной модели выполнено с "
+        "использованием нотации UML (Unified Modeling Language). "
+        "Построены четыре типа диаграмм: диаграмма прецедентов, "
+        "диаграмма классов, диаграмма последовательностей "
+        "и диаграмма активности. Каждая диаграмма описывает "
+        "отдельный аспект проектируемой системы.")
 
     # ── 3.1.1 ──
     add_heading3(doc, "3.1.1 Создание диаграммы прецедентов")
 
     add_body(doc,
-        "Диаграмма прецедентов определяет внешних пользователей системы "
-        "(акторов) и варианты их взаимодействия с веб-сервисом. "
-        "В разрабатываемой системе выделены четыре основных актора:")
+        "Диаграмма прецедентов определяет внешних пользователей "
+        "системы (акторов) и варианты их взаимодействия "
+        "с веб-сервисом. В разрабатываемой системе выделены "
+        "четыре основных актора:")
 
     actors = [
-        ("Преподаватель", "создаёт лекции, генерирует или вручную "
-         "формирует тесты, редактирует и публикует, просматривает "
-         "аналитику успеваемости по группам и студентам."),
-        ("Студент", "получает доступ к тесту, проходит его "
-         "и просматривает собственную аналитику и точки роста."),
-        ("Администратор", "управляет пользователями, группами, "
-         "дисциплинами и назначениями преподавателей."),
-        ("AI-модуль", "принимает текст лекции и формирует набор "
-         "тестовых вопросов для последующей валидации преподавателем."),
+        "Преподаватель — создаёт лекции, генерирует или вручную "
+        "формирует тесты, редактирует и публикует, просматривает "
+        "аналитику успеваемости по группам и студентам.",
+        "Студент — получает доступ к тесту, проходит его "
+        "и просматривает собственную аналитику и точки роста.",
+        "Администратор — управляет пользователями, группами, "
+        "дисциплинами и назначениями преподавателей.",
+        "AI-модуль — принимает текст лекции и формирует набор "
+        "тестовых вопросов для последующей валидации преподавателем.",
     ]
-    for name, desc in actors:
-        add_body(doc, f"{name} — {desc}")
+    for a in actors:
+        add_list_item(doc, a)
 
     add_body(doc,
         "Полная диаграмма прецедентов приведена в приложении А. "
         "Ключевой особенностью модели является то, что преподаватель "
-        "является центральным актором — именно его прикладной маршрут "
-        "определяет основную ценность сервиса.")
+        "является центральным актором — именно его прикладной "
+        "маршрут определяет основную ценность сервиса.")
 
     # ── 3.1.2 ──
     add_heading3(doc, "3.1.2 Создание диаграммы классов")
 
     add_body(doc,
-        "Диаграмма классов отражает учебные сущности, ролевую структуру "
-        "и связи между тестированием и аналитикой. В модели выделены "
-        "следующие основные классы:")
+        "Диаграмма классов отражает учебные сущности, ролевую "
+        "структуру и связи между тестированием и аналитикой. "
+        "В модели выделены следующие основные классы:")
 
     classes = [
-        ("User", "содержит атрибуты id, full_name, login, role. "
-         "Определяет ролевую принадлежность пользователя."),
-        ("Group", "идентификатор и название учебной группы."),
-        ("Discipline", "описание дисциплины, привязанной к преподавателю."),
-        ("Lecture", "текст лекции, привязанный к дисциплине."),
-        ("Test", "тестовое задание, созданное на основе лекции."),
-        ("Question", "отдельный вопрос теста с вариантами ответов."),
-        ("Attempt", "попытка прохождения теста студентом с результатом."),
-        ("Answer", "ответ студента на конкретный вопрос в рамках попытки."),
+        "User — содержит атрибуты id, full_name, login, role. "
+        "Определяет ролевую принадлежность пользователя.",
+        "Group — идентификатор и название учебной группы.",
+        "Discipline — описание дисциплины, привязанной "
+        "к преподавателю.",
+        "Lecture — текст лекции, привязанный к дисциплине.",
+        "Test — тестовое задание, созданное на основе лекции.",
+        "Question — отдельный вопрос теста с вариантами ответов.",
+        "Attempt — попытка прохождения теста студентом с результатом.",
+        "Answer — ответ студента на конкретный вопрос в рамках "
+        "попытки.",
     ]
-    for cls, desc in classes:
-        add_body(doc, f"{cls} — {desc}")
+    for c in classes:
+        add_list_item(doc, c)
 
     add_body(doc,
         "Ключевой связью является цепочка: дисциплина → лекция → "
         "тест → попытка → аналитика. Данная структура позволяет "
-        "интерпретировать результаты тестирования в предметном контексте. "
-        "Доступ преподавателя к студентам осуществляется не напрямую, "
-        "а через назначение «дисциплина + группа», что точнее "
-        "отражает реальный учебный процесс. "
+        "интерпретировать результаты тестирования в предметном "
+        "контексте. Доступ преподавателя к студентам осуществляется "
+        "не напрямую, а через назначение «дисциплина + группа», "
+        "что точнее отражает реальный учебный процесс. "
         "Полная диаграмма классов приведена в приложении Б.")
 
     # ── 3.1.3 ──
@@ -945,20 +1112,22 @@ def main():
     add_heading3(doc, "3.1.4 Создание диаграммы активности")
 
     add_body(doc,
-        "Диаграмма активности моделирует процесс работы преподавателя "
-        "с системой от момента входа до получения аналитики. "
-        "Ключевым элементом диаграммы является развилка «Режим?», "
-        "отражающая выбор преподавателя между двумя способами создания "
-        "теста: автоматическая AI-генерация или ручной конструктор.")
+        "Диаграмма активности моделирует процесс работы "
+        "преподавателя с системой от момента входа до получения "
+        "аналитики. Ключевым элементом диаграммы является развилка "
+        "«Режим?», отражающая выбор преподавателя между двумя "
+        "способами создания теста: автоматическая AI-генерация "
+        "или ручной конструктор.")
 
     add_body(doc,
         "Оба потока сходятся на этапе «Редактирование и публикация», "
-        "после чего тест становится доступным обучающимся. Завершающим "
-        "этапом является анализ результатов прохождения. "
-        "Полная диаграмма приведена в приложении Г.")
+        "после чего тест становится доступным обучающимся. "
+        "Завершающим этапом является анализ результатов "
+        "прохождения. Полная диаграмма приведена в приложении Г.")
 
     # ── 3.2 ──
-    add_heading2(doc, "3.2 Проектирование и разработка базы данных")
+    add_heading2(doc,
+        "3.2 Проектирование и разработка базы данных")
 
     add_body(doc,
         "Физическая модель базы данных построена по фактической "
@@ -969,31 +1138,34 @@ def main():
         "teaching_assignments и teaching_assignment_blocks.")
 
     add_body(doc,
-        "Таблица users хранит информацию о пользователях всех ролей "
-        "(преподаватель, студент, администратор). Роль определяется "
-        "полем role и влияет на доступ к маршрутам веб-сервиса.")
+        "Таблица users хранит информацию о пользователях всех "
+        "ролей (преподаватель, студент, администратор). Роль "
+        "определяется полем role и влияет на доступ к маршрутам "
+        "веб-сервиса.")
 
     add_body(doc,
-        "Таблица teaching_assignments реализует связь «преподаватель — "
-        "дисциплина — группа» и является ключевым элементом модели "
-        "доступа: именно через эту таблицу определяется, какие "
-        "обучающиеся получают доступ к тестам конкретной дисциплины "
-        "и какие результаты попадают в преподавательскую аналитику.")
+        "Таблица teaching_assignments реализует связь "
+        "«преподаватель — дисциплина — группа» и является ключевым "
+        "элементом модели доступа: именно через эту таблицу "
+        "определяется, какие обучающиеся получают доступ к тестам "
+        "конкретной дисциплины и какие результаты попадают "
+        "в преподавательскую аналитику.")
 
     add_body(doc,
         "Таблица teaching_assignment_blocks обеспечивает управляемое "
         "отключение группы от дисциплины без разрушения накопленной "
         "аналитики. Структура поддерживает несколько преподавателей "
-        "у одной группы, несколько групп у одной дисциплины и "
-        "публикацию тестов на основе лекций с последующим накоплением "
-        "попыток и ответов.")
+        "у одной группы, несколько групп у одной дисциплины "
+        "и публикацию тестов на основе лекций с последующим "
+        "накоплением попыток и ответов.")
 
     add_body(doc,
         "ER-диаграмма (физическая модель базы данных) приведена "
         "в приложении Д.")
 
     # ── 3.3 ──
-    add_heading2(doc, "3.3 Создание прототипа системы")
+    add_heading2(doc,
+        "3.3 Реализация компонентов системы")
 
     add_body(doc,
         "Прототип веб-сервиса реализован как полнофункциональное "
@@ -1006,22 +1178,46 @@ def main():
     add_body(doc,
         "Архитектура решения включает четыре уровня:")
     levels = [
-        ("Клиентский уровень", "адаптивные HTML-страницы преподавателя, "
-         "студента и администратора, ориентированные на реальные "
-         "сценарии эксплуатации."),
-        ("Серверный уровень", "маршруты FastAPI, авторизация, "
-         "обработка лекций, публикация тестов и построение аналитики. "
-         "Основной код сосредоточен в модуле main.py."),
-        ("AI-модуль", "модуль ai.py формирует тестовые вопросы "
-         "по лекции и передаёт их преподавателю на валидацию."),
-        ("Слой данных", "модуль db.py хранит пользователей, группы, "
-         "дисциплины, лекции, тесты, попытки и ответы."),
+        "Клиентский уровень — адаптивные HTML-страницы "
+        "преподавателя, студента и администратора, ориентированные "
+        "на реальные сценарии эксплуатации.",
+        "Серверный уровень — маршруты FastAPI, авторизация, "
+        "обработка лекций, публикация тестов и построение "
+        "аналитики. Основной код сосредоточен в модуле main.py.",
+        "AI-модуль — модуль ai.py формирует тестовые вопросы "
+        "по лекции и передаёт их преподавателю на валидацию.",
+        "Слой данных — модуль db.py хранит пользователей, группы, "
+        "дисциплины, лекции, тесты, попытки и ответы.",
     ]
-    for title, desc in levels:
-        add_body(doc, f"{title} — {desc}")
+    for lv in levels:
+        add_list_item(doc, lv)
+
+    add_body(doc,
+        "Серверная часть реализована в файле main.py, где создаётся "
+        "экземпляр FastAPI-приложения, подключается Jinja2 "
+        "и регистрируются маршруты для каждой роли.")
+
+    add_body(doc,
+        "Модуль авторизации реализован в security.py и обеспечивает "
+        "хеширование паролей (bcrypt), сессионную аутентификацию "
+        "и проверку ролей при доступе к маршрутам. Каждый маршрут "
+        "проверяет наличие активной сессии и ролевую принадлежность "
+        "пользователя перед выполнением операции.")
+
+    add_body(doc,
+        "Модуль db.py содержит функции создания таблиц, "
+        "миграций и CRUD-операций. Все SQL-запросы написаны "
+        "в совместимом с SQLite и PostgreSQL синтаксисе, "
+        "что обеспечивает единый прикладной код для обеих сред.")
+
+    add_body(doc,
+        "Модуль lecture_import.py реализует импорт лекционного "
+        "материала из текстовых файлов. Преподаватель загружает "
+        "файл, система извлекает текстовое содержание и сохраняет "
+        "его в базе данных для последующей генерации тестов.")
 
     add_figure(doc, IMAGES / "01_home_desktop.png",
-               "Рисунок 3 – Стартовый экран веб-сервиса КампусПлюс")
+               "Рисунок 1 – Стартовый экран веб-сервиса КампусПлюс")
 
     # ── 3.4 ──
     add_heading2(doc, "3.4 Интерфейс программы")
@@ -1033,22 +1229,32 @@ def main():
         "для выполнения соответствующих задач.")
 
     add_body(doc,
-        "Контур преподавателя включает панель управления дисциплинами, "
-        "редактор лекций, список тестов с возможностью публикации, "
-        "генерацию QR-кода для быстрого доступа на занятии, "
-        "а также аналитику успеваемости по группам и студентам.")
+        "Контур преподавателя включает панель управления "
+        "дисциплинами, редактор лекций, список тестов "
+        "с возможностью публикации, генерацию QR-кода для быстрого "
+        "доступа на занятии, а также аналитику успеваемости "
+        "по группам и студентам.")
 
     add_figure(doc, IMAGES / "04_teacher_panel_desktop.png",
-               "Рисунок 4 – Панель преподавателя")
+               "Рисунок 2 – Панель преподавателя")
 
     add_figure(doc, IMAGES / "05_teacher_lectures_desktop.png",
-               "Рисунок 5 – Работа с лекциями и дисциплинами")
+               "Рисунок 3 – Работа с лекциями и дисциплинами")
 
     add_figure(doc, IMAGES / "06_teacher_tests_desktop.png",
-               "Рисунок 6 – Управление тестами")
+               "Рисунок 4 – Управление тестами")
 
     add_figure(doc, IMAGES / "07_teacher_qr_desktop.png",
-               "Рисунок 7 – QR-код для быстрого доступа студентов к тесту")
+               "Рисунок 5 – QR-код для быстрого доступа к тесту")
+
+    add_body(doc,
+        "Ручной конструктор тестов позволяет преподавателю "
+        "сформировать тест без использования AI-модуля. Интерфейс "
+        "конструктора обеспечивает добавление произвольного числа "
+        "вопросов, указание вариантов ответа и правильного ответа.")
+
+    add_figure(doc, IMAGES / "16_teacher_manual_test_form_desktop.png",
+               "Рисунок 6 – Ручной конструктор тестов")
 
     add_body(doc,
         "Контур студента обеспечивает доступ к доступным тестам, "
@@ -1056,29 +1262,32 @@ def main():
         "и персональной аналитики с точками роста.")
 
     add_figure(doc, IMAGES / "08_student_dashboard_desktop.png",
-               "Рисунок 8 – Личный кабинет студента")
+               "Рисунок 7 – Личный кабинет студента")
 
     add_figure(doc, IMAGES / "10_student_analytics_desktop.png",
-               "Рисунок 9 – Аналитика студента")
+               "Рисунок 8 – Аналитика студента")
 
     add_figure(doc, IMAGES / "15_student_growth_desktop.png",
-               "Рисунок 10 – Точки роста: проблемные темы для повторения")
+               "Рисунок 9 – Точки роста: проблемные темы "
+               "для повторения")
 
     add_body(doc,
         "Контур администратора позволяет управлять пользователями, "
         "группами, дисциплинами и назначениями преподавателей.")
 
     add_figure(doc, IMAGES / "11_admin_students_desktop.png",
-               "Рисунок 11 – Управление студентами в административной панели")
+               "Рисунок 10 – Управление студентами")
 
-    add_figure(doc, IMAGES / "12_admin_groups_desktop.png",
-               "Рисунок 12 – Управление группами")
+    add_figure(doc, IMAGES / "14_teacher_student_performance_desktop.png",
+               "Рисунок 11 – Аналитика успеваемости студента "
+               "у преподавателя")
 
     add_body(doc,
-        "Интерфейс адаптирован для мобильных устройств и сохраняет "
-        "функциональность при просмотре на смартфонах. Мобильная "
-        "версия особенно актуальна для студентов, проходящих "
-        "тестирование непосредственно на занятии через QR-код.")
+        "Интерфейс адаптирован для мобильных устройств "
+        "и сохраняет функциональность при просмотре "
+        "на смартфонах. Мобильная версия особенно актуальна "
+        "для студентов, проходящих тестирование непосредственно "
+        "на занятии через QR-код.")
 
     # ── 3.5 ──
     add_heading2(doc, "3.5 Тестирование системы")
@@ -1089,65 +1298,77 @@ def main():
         "тестирование с использованием фреймворка pytest.")
 
     add_body(doc,
-        "Ручное тестирование охватывает 20 тест-кейсов, проверяющих "
-        "основные пользовательские сценарии: авторизацию и разграничение "
-        "ролей, маршрут преподавателя (создание дисциплины, лекции, "
-        "теста и публикация), маршрут студента (регистрация, прохождение "
-        "теста, просмотр аналитики), маршрут администратора (управление "
-        "пользователями и группами), а также проверку ролевой модели "
-        "(попытка доступа к чужим ресурсам). Полный набор тест-кейсов "
-        "опубликован на странице проекта: campusplus.onrender.com/vkr/testing.")
+        "Ручное тестирование охватывает 20 тест-кейсов, "
+        "проверяющих основные пользовательские сценарии: "
+        "авторизацию и разграничение ролей, маршрут преподавателя "
+        "(создание дисциплины, лекции, теста и публикация), "
+        "маршрут студента (регистрация, прохождение теста, "
+        "просмотр аналитики), маршрут администратора (управление "
+        "пользователями и группами), а также проверку ролевой "
+        "модели (попытка доступа к чужим ресурсам). Полный набор "
+        "тест-кейсов опубликован на странице проекта: "
+        "campusplus.onrender.com/vkr/testing.")
+
+    add_body(doc,
+        "Каждый тест-кейс описывает цель проверки, "
+        "последовательность шагов и ожидаемый результат. "
+        "Все 20 сценариев пройдены на тестовом стенде "
+        "и на продуктивной среде Render без выявления критичных "
+        "дефектов.")
 
     add_body(doc,
         "Автоматизированные тесты проверяют следующие контуры:")
-
     auto_areas = [
         "устойчивость сценариев входа, выхода и сброса пароля;",
-        "корректность назначения студентов через дисциплину и группу;",
-        "защита от доступа к чужим тестам и административным разделам;",
+        "корректность назначения студентов через дисциплину "
+        "и группу;",
+        "защита от доступа к чужим тестам и административным "
+        "разделам;",
         "корректность подсчёта результатов, точек роста "
         "и преподавательской аналитики;",
-        "стабильность вспомогательных SQL-операций для PostgreSQL и SQLite;",
-        "безопасность: CSRF-защита, ограничение размера загружаемых файлов, "
-        "защита от path traversal."
+        "стабильность вспомогательных SQL-операций для PostgreSQL "
+        "и SQLite;",
+        "безопасность: CSRF-защита, ограничение размера загружаемых "
+        "файлов, защита от path traversal."
     ]
     for a in auto_areas:
-        add_body(doc, f"– {a}")
+        add_list_item(doc, a)
 
     add_body(doc,
         "Суммарно автоматизированный тестовый набор включает "
-        "свыше 140 тестов, покрывающих ключевые маршруты и "
-        "функции веб-сервиса. Тесты запускаются с помощью pytest "
-        "и могут быть выполнены при каждом развёртывании для "
-        "оперативного выявления регрессий.")
-
-    add_figure(doc, IMAGES / "14_teacher_student_performance_desktop.png",
-               "Рисунок 13 – Аналитика успеваемости студента у преподавателя")
+        "свыше 140 тестов, покрывающих ключевые маршруты "
+        "и функции веб-сервиса. Тесты запускаются с помощью "
+        "pytest и могут быть выполнены при каждом развёртывании "
+        "для оперативного выявления регрессий.")
 
     # ── 3.6 ──
     add_heading2(doc, "3.6 Выводы по третьему разделу")
+
     add_body(doc,
         "В третьем разделе выполнено проектирование функциональной "
-        "модели системы с использованием диаграмм прецедентов, классов, "
-        "последовательностей и активности. Разработана физическая модель "
-        "базы данных, реализован серверный и клиентский уровни "
-        "веб-сервиса. Описан интерфейс программы для всех ролей "
-        "пользователей. Проведено ручное (20 тест-кейсов) и "
-        "автоматизированное (140+ тестов) тестирование системы.")
+        "модели системы с использованием диаграмм прецедентов, "
+        "классов, последовательностей и активности. Разработана "
+        "физическая модель базы данных, реализован серверный "
+        "и клиентский уровни веб-сервиса. Описан интерфейс "
+        "программы для всех ролей пользователей. Проведено ручное "
+        "(20 тест-кейсов) и автоматизированное (140+ тестов) "
+        "тестирование системы.")
 
     doc.add_page_break()
 
-    # ── ЗАКЛЮЧЕНИЕ ─────────────────────────────────────────────
-    add_h_center(doc, "ЗАКЛЮЧЕНИЕ", bold=True)
+    # ══════════════════════════════════════════════════════════
+    #  ЗАКЛЮЧЕНИЕ
+    # ══════════════════════════════════════════════════════════
+    add_heading1(doc, "ЗАКЛЮЧЕНИЕ")
     add_empty(doc)
 
     add_body(doc,
         "В ходе выполнения выпускной квалификационной работы "
         "разработан веб-сервис «КампусПлюс» для мониторинга "
-        "успеваемости с применением технологий искусственного интеллекта.")
+        "успеваемости с применением технологий искусственного "
+        "интеллекта.")
 
-    add_body(doc,
-        "В рамках работы решены следующие задачи:")
+    add_body(doc, "В рамках работы решены следующие задачи:")
 
     conclusions = [
         "Проведён анализ предметной области контроля знаний "
@@ -1174,12 +1395,12 @@ def main():
         add_body(doc, f"{i}. {c}")
 
     add_body(doc,
-        "Разработанный веб-сервис формирует единый прикладной маршрут "
-        "преподавателя: дисциплина → лекция → генерация или ручное "
-        "создание теста → публикация → прохождение студентом → "
-        "аналитика и точки роста. Такой подход позволяет сохранить "
-        "предметный контекст на всех этапах работы и обеспечить "
-        "интерпретируемую обратную связь.")
+        "Разработанный веб-сервис формирует единый прикладной "
+        "маршрут преподавателя: дисциплина → лекция → генерация "
+        "или ручное создание теста → публикация → прохождение "
+        "студентом → аналитика и точки роста. Такой подход "
+        "позволяет сохранить предметный контекст на всех этапах "
+        "работы и обеспечить интерпретируемую обратную связь.")
 
     add_body(doc,
         "Результаты работы могут быть использованы на кафедре "
@@ -1188,197 +1409,209 @@ def main():
 
     doc.add_page_break()
 
-    # ── СПИСОК ЛИТЕРАТУРЫ ──────────────────────────────────────
-    add_h_center(doc, "СПИСОК ЛИТЕРАТУРЫ", bold=True)
+    # ══════════════════════════════════════════════════════════
+    #  СПИСОК ЛИТЕРАТУРЫ
+    # ══════════════════════════════════════════════════════════
+    add_heading1(doc, "СПИСОК ЛИТЕРАТУРЫ")
     add_empty(doc)
 
     bibliography = [
-        "1 Буч, Г. Язык UML. Руководство пользователя : учебное пособие / "
-        "Г. Буч, Дж. Рамбо, А. Якобсон. — 2-е изд. — Москва : ДМК Пресс, "
-        "2018. — 496 с. — ISBN 978-5-97060-625-5. — Текст : непосредственный.",
+        "1 Буч, Г. Язык UML. Руководство пользователя : учебное "
+        "пособие / Г. Буч, Дж. Рамбо, А. Якобсон. — 2-е изд. — "
+        "Москва : ДМК Пресс, 2018. — 496 с. — "
+        "ISBN 978-5-97060-625-5.",
 
-        "2 Гамма, Э. Приёмы объектно-ориентированного проектирования. "
-        "Паттерны проектирования / Э. Гамма, Р. Хелм, Р. Джонсон, "
-        "Дж. Влиссидес. — Санкт-Петербург : Питер, 2020. — 368 с. — "
-        "ISBN 978-5-4461-1213-7. — Текст : непосредственный.",
+        "2 Гамма, Э. Приёмы объектно-ориентированного "
+        "проектирования. Паттерны проектирования / Э. Гамма, "
+        "Р. Хелм, Р. Джонсон, Дж. Влиссидес. — Санкт-Петербург : "
+        "Питер, 2020. — 368 с. — ISBN 978-5-4461-1213-7.",
 
         "3 Грингард, О. Е. FastAPI: современный подход к разработке "
-        "веб-приложений на Python : учебное пособие / О. Е. Грингард. — "
-        "Москва : ДМК Пресс, 2024. — 312 с. — ISBN 978-5-93700-220-7. — "
-        "Текст : непосредственный.",
+        "веб-приложений на Python : учебное пособие / "
+        "О. Е. Грингард. — Москва : ДМК Пресс, 2024. — 312 с. — "
+        "ISBN 978-5-93700-220-7.",
 
-        "4 Дейт, К. Дж. Введение в системы баз данных / К. Дж. Дейт. — "
-        "8-е изд. — Москва : Вильямс, 2019. — 1328 с. — "
-        "ISBN 978-5-8459-1788-2. — Текст : непосредственный.",
+        "4 Дейт, К. Дж. Введение в системы баз данных / "
+        "К. Дж. Дейт. — 8-е изд. — Москва : Вильямс, 2019. — "
+        "1328 с. — ISBN 978-5-8459-1788-2.",
 
         "5 Коннолли, Т. Базы данных: проектирование, реализация "
-        "и сопровождение. Теория и практика / Т. Коннолли, К. Бегг. — "
-        "3-е изд. — Москва : Вильямс, 2017. — 1440 с. — "
-        "ISBN 978-5-8459-1932-9. — Текст : непосредственный.",
+        "и сопровождение / Т. Коннолли, К. Бегг. — 3-е изд. — "
+        "Москва : Вильямс, 2017. — 1440 с. — "
+        "ISBN 978-5-8459-1932-9.",
 
         "6 Лутц, М. Изучаем Python / М. Лутц. — 5-е изд. — "
         "Санкт-Петербург : Диалектика, 2019. — 832 с. — "
-        "ISBN 978-5-907114-51-3. — Текст : непосредственный.",
+        "ISBN 978-5-907114-51-3.",
 
         "7 Маккинни, У. Python и анализ данных / У. Маккинни. — "
-        "Москва : ДМК Пресс, 2020. — 540 с. — ISBN 978-5-97060-590-6. — "
-        "Текст : непосредственный.",
+        "Москва : ДМК Пресс, 2020. — 540 с. — "
+        "ISBN 978-5-97060-590-6.",
 
         "8 Фаулер, М. UML. Основы / М. Фаулер. — 3-е изд. — "
-        "Москва : Символ-Плюс, 2018. — 192 с. — ISBN 978-5-93286-060-4. — "
-        "Текст : непосредственный.",
+        "Москва : Символ-Плюс, 2018. — 192 с. — "
+        "ISBN 978-5-93286-060-4.",
 
-        "9 Фомичева, С. Г. Разработка, проектирование и сопровождение "
-        "приложений баз данных : учебное пособие / С. Г. Фомичева. — Норильск : "
-        "ЗГУ им. Н. М. Федоровского, 2021. — ISBN 978-5-89009-744-6. — "
-        "Текст : электронный.",
+        "9 Фомичева, С. Г. Разработка, проектирование и "
+        "сопровождение приложений баз данных : учебное пособие / "
+        "С. Г. Фомичева. — Норильск : ЗГУ им. Н. М. Федоровского, "
+        "2021. — ISBN 978-5-89009-744-6.",
 
-        "10 Шмидт, Д. Шаблоны сетевого программирования "
-        "/ Д. Шмидт, М. Стэлл, Х. Роницке, Д. Хюль. — "
-        "Москва : Вильямс, 2020. — 384 с. — "
-        "ISBN 978-5-8459-2041-7. — Текст : непосредственный.",
+        "10 Шмидт, Д. Шаблоны сетевого программирования / "
+        "Д. Шмидт, М. Стэлл, Х. Роницке, Д. Хюль. — Москва : "
+        "Вильямс, 2020. — 384 с. — ISBN 978-5-8459-2041-7.",
 
         "11 ГОСТ Р ИСО/МЭК 12207-2010. Информационная технология. "
-        "Системная и программная инженерия. Процессы жизненного цикла "
-        "программных средств. — Введ. 2012-03-01. — Москва : "
-        "Стандартинформ, 2011. — 106 с. — Текст : непосредственный.",
+        "Системная и программная инженерия. Процессы жизненного "
+        "цикла программных средств. — Введ. 2012-03-01. — Москва : "
+        "Стандартинформ, 2011. — 106 с.",
 
         "12 ГОСТ 34.602-2020. Информационные технологии. Комплекс "
-        "стандартов на автоматизированные системы. Техническое задание "
-        "на создание автоматизированной системы. — Введ. 2021-11-30. — "
-        "Москва : Стандартинформ, 2020. — 28 с. — Текст : непосредственный.",
+        "стандартов на автоматизированные системы. Техническое "
+        "задание. — Введ. 2021-11-30. — Москва : Стандартинформ, "
+        "2020. — 28 с.",
 
-        "13 ГОСТ 19.201-78. Единая система программной документации. "
-        "Техническое задание. Требования к содержанию и оформлению. — "
-        "Введ. 1980-01-01. — Москва : Стандартинформ, 2010. — "
-        "Текст : непосредственный.",
+        "13 ГОСТ 19.201-78. Единая система программной "
+        "документации. Техническое задание. Требования к содержанию "
+        "и оформлению. — Введ. 1980-01-01. — Москва : "
+        "Стандартинформ, 2010.",
 
-        "14 FastAPI — official documentation [Электронный ресурс]. — "
-        "URL: https://fastapi.tiangolo.com (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "14 FastAPI — official documentation [Электронный ресурс]. "
+        "— URL: https://fastapi.tiangolo.com (дата обращения: "
+        "15.03.2026).",
 
-        "15 Jinja2 Template Engine — documentation [Электронный ресурс]. — "
-        "URL: https://jinja.palletsprojects.com (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "15 Jinja2 Template Engine — documentation [Электронный "
+        "ресурс]. — URL: https://jinja.palletsprojects.com (дата "
+        "обращения: 15.03.2026).",
 
         "16 SQLite documentation [Электронный ресурс]. — "
-        "URL: https://www.sqlite.org/docs.html (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "URL: https://www.sqlite.org/docs.html (дата обращения: "
+        "15.03.2026).",
 
         "17 PostgreSQL documentation [Электронный ресурс]. — "
-        "URL: https://www.postgresql.org/docs (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "URL: https://www.postgresql.org/docs (дата обращения: "
+        "15.03.2026).",
 
         "18 OpenAI API Reference [Электронный ресурс]. — "
         "URL: https://platform.openai.com/docs/api-reference "
-        "(дата обращения: 15.03.2026). — Текст : электронный.",
+        "(дата обращения: 15.03.2026).",
 
         "19 Uvicorn — ASGI server [Электронный ресурс]. — "
-        "URL: https://www.uvicorn.org (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "URL: https://www.uvicorn.org (дата обращения: "
+        "15.03.2026).",
 
-        "20 Render — cloud hosting platform [Электронный ресурс]. — "
-        "URL: https://render.com (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "20 Render — cloud hosting platform [Электронный ресурс]. "
+        "— URL: https://render.com (дата обращения: 15.03.2026).",
 
-        "21 Васильева К. Н., Хусаинова Г. Я. Реляционные базы данных "
-        "// Colloquium-journal. — 2020. — № 2(54). — URL: "
+        "21 Васильева К. Н., Хусаинова Г. Я. Реляционные базы "
+        "данных // Colloquium-journal. — 2020. — № 2(54). — URL: "
         "https://cyberleninka.ru/article/n/relyatsionnye-bazy-dannyh "
-        "(дата обращения: 03.03.2026). — Текст : электронный.",
+        "(дата обращения: 03.03.2026).",
 
         "22 Боровской И. Г., Шельмина Е. А. Сравнительный анализ "
         "настольных и клиент-серверных СУБД // Доклады ТУСУР. — "
         "2017. — № 4. — URL: https://cyberleninka.ru/article/n/"
         "sravnitelnyy-analiz-nastolnyh-i-klient-servernyh-subd "
-        "(дата обращения: 03.03.2026). — Текст : электронный.",
+        "(дата обращения: 03.03.2026).",
 
         "23 Бедняк, С. Г. Платформы и программные среды разработки "
         "информационных систем : учебное пособие / С. Г. Бедняк, "
-        "О. И. Захарова. — Самара : ПГУТИ, 2021. — 185 с. — "
-        "Текст : непосредственный.",
+        "О. И. Захарова. — Самара : ПГУТИ, 2021. — 185 с.",
 
-        "24 Moodle — open-source learning platform [Электронный ресурс]. — "
-        "URL: https://moodle.org (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "24 Moodle — open-source learning platform [Электронный "
+        "ресурс]. — URL: https://moodle.org (дата обращения: "
+        "15.03.2026).",
 
         "25 Stepik — онлайн-образование [Электронный ресурс]. — "
-        "URL: https://stepik.org (дата обращения: 15.03.2026). — "
-        "Текст : электронный.",
+        "URL: https://stepik.org (дата обращения: 15.03.2026).",
     ]
     for b in bibliography:
-        add_bib(doc, b)
+        add_list_item(doc, b)
 
     doc.add_page_break()
 
-    # ── ПРИЛОЖЕНИЯ ─────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    #  ПРИЛОЖЕНИЯ
+    # ══════════════════════════════════════════════════════════
     appendices = [
-        ("А", "ДИАГРАММА ПРЕЦЕДЕНТОВ", "Рисунок А.1 – Диаграмма прецедентов",
+        ("А", "ДИАГРАММА ПРЕЦЕДЕНТОВ",
+         "Рисунок А.1 – Диаграмма прецедентов",
          DIAGRAMS / "use_case.png"),
-        ("Б", "ДИАГРАММА КЛАССОВ", "Рисунок Б.1 – Диаграмма классов",
+        ("Б", "ДИАГРАММА КЛАССОВ",
+         "Рисунок Б.1 – Диаграмма классов",
          DIAGRAMS / "class_diagram.png"),
-        ("В", "ДИАГРАММА ПОСЛЕДОВАТЕЛЬНОСТЕЙ", "Рисунок В.1 – Диаграмма последовательностей",
+        ("В", "ДИАГРАММА ПОСЛЕДОВАТЕЛЬНОСТЕЙ",
+         "Рисунок В.1 – Диаграмма последовательностей",
          DIAGRAMS / "sequence.png"),
-        ("Г", "ДИАГРАММА АКТИВНОСТИ", "Рисунок Г.1 – Диаграмма активности",
+        ("Г", "ДИАГРАММА АКТИВНОСТИ",
+         "Рисунок Г.1 – Диаграмма активности",
          DIAGRAMS / "activity.png"),
-        ("Д", "ФИЗИЧЕСКАЯ МОДЕЛЬ БАЗЫ ДАННЫХ", "Рисунок Д.1 – Физическая модель базы данных",
+        ("Д", "ФИЗИЧЕСКАЯ МОДЕЛЬ БАЗЫ ДАННЫХ",
+         "Рисунок Д.1 – Физическая модель базы данных",
          DIAGRAMS / "er_diagram.png"),
     ]
     for letter, title, fig_caption, img_path in appendices:
-        try:
-            add_para(doc, f"ПРИЛОЖЕНИЕ {letter}", "!Приложение (обязательное)")
-        except KeyError:
-            add_h_center(doc, f"ПРИЛОЖЕНИЕ {letter}")
-        add_h_center(doc, title)
+        add_heading1(doc, f"ПРИЛОЖЕНИЕ {letter}")
+        add_center(doc, title, bold=True)
         add_empty(doc)
         add_figure(doc, img_path, fig_caption, width_cm=16)
         doc.add_page_break()
 
     # Приложение Е — скриншоты
-    try:
-        add_para(doc, "ПРИЛОЖЕНИЕ Е", "!Приложение (обязательное)")
-    except KeyError:
-        add_h_center(doc, "ПРИЛОЖЕНИЕ Е")
-    add_h_center(doc, "РЕЗУЛЬТАТЫ РАБОТЫ ПРОГРАММЫ")
+    add_heading1(doc, "ПРИЛОЖЕНИЕ Е")
+    add_center(doc, "РЕЗУЛЬТАТЫ РАБОТЫ ПРОГРАММЫ", bold=True)
     add_empty(doc)
 
-    results_screenshots = [
-        (IMAGES / "01_home_desktop.png", "Рисунок Е.1 – Главная страница веб-сервиса"),
-        (IMAGES / "04_teacher_panel_desktop.png", "Рисунок Е.2 – Панель преподавателя"),
-        (IMAGES / "05_teacher_lectures_desktop.png", "Рисунок Е.3 – Работа с лекциями"),
-        (IMAGES / "06_teacher_tests_desktop.png", "Рисунок Е.4 – Управление тестами"),
-        (IMAGES / "07_teacher_qr_desktop.png", "Рисунок Е.5 – QR-код доступа к тесту"),
-        (IMAGES / "08_student_dashboard_desktop.png", "Рисунок Е.6 – Личный кабинет студента"),
-        (IMAGES / "10_student_analytics_desktop.png", "Рисунок Е.7 – Аналитика студента"),
-        (IMAGES / "15_student_growth_desktop.png", "Рисунок Е.8 – Точки роста"),
-        (IMAGES / "16_teacher_manual_test_form_desktop.png", "Рисунок Е.9 – Ручной конструктор тестов"),
-        (IMAGES / "11_admin_students_desktop.png", "Рисунок Е.10 – Административная панель"),
-        (IMAGES / "14_teacher_student_performance_desktop.png", "Рисунок Е.11 – Успеваемость студента"),
+    screenshots = [
+        (IMAGES / "01_home_desktop.png",
+         "Рисунок Е.1 – Главная страница веб-сервиса"),
+        (IMAGES / "04_teacher_panel_desktop.png",
+         "Рисунок Е.2 – Панель преподавателя"),
+        (IMAGES / "05_teacher_lectures_desktop.png",
+         "Рисунок Е.3 – Работа с лекциями"),
+        (IMAGES / "06_teacher_tests_desktop.png",
+         "Рисунок Е.4 – Управление тестами"),
+        (IMAGES / "07_teacher_qr_desktop.png",
+         "Рисунок Е.5 – QR-код доступа к тесту"),
+        (IMAGES / "08_student_dashboard_desktop.png",
+         "Рисунок Е.6 – Личный кабинет студента"),
+        (IMAGES / "10_student_analytics_desktop.png",
+         "Рисунок Е.7 – Аналитика студента"),
+        (IMAGES / "15_student_growth_desktop.png",
+         "Рисунок Е.8 – Точки роста"),
+        (IMAGES / "16_teacher_manual_test_form_desktop.png",
+         "Рисунок Е.9 – Ручной конструктор тестов"),
+        (IMAGES / "11_admin_students_desktop.png",
+         "Рисунок Е.10 – Административная панель"),
+        (IMAGES / "14_teacher_student_performance_desktop.png",
+         "Рисунок Е.11 – Успеваемость студента"),
     ]
-    for img_path, caption in results_screenshots:
+    for img_path, caption in screenshots:
         add_figure(doc, img_path, caption, width_cm=15)
         add_empty(doc)
 
-    # Приложение Ж — QR-код доступа к материалам ВКР
+    # Приложение Ж — QR-код
     doc.add_page_break()
-    try:
-        add_para(doc, "ПРИЛОЖЕНИЕ Ж", "!Приложение (обязательное)")
-    except KeyError:
-        add_h_center(doc, "ПРИЛОЖЕНИЕ Ж")
-    add_h_center(doc, "QR-КОД ДОСТУПА К МАТЕРИАЛАМ ВКР")
+    add_heading1(doc, "ПРИЛОЖЕНИЕ Ж")
+    add_center(doc, "QR-КОД ДОСТУПА К МАТЕРИАЛАМ ВКР", bold=True)
     add_empty(doc)
     add_body(doc,
-        "Для доступа к материалам выпускной квалификационной работы — "
-        "тестовым сценариям, акту внедрения, результатам и техническому "
-        "заданию используйте QR-код, представленный ниже, или перейдите по "
-        "адресу: https://campusplus.onrender.com/vkr")
+        "Для доступа к материалам выпускной квалификационной "
+        "работы — тестовым сценариям, акту внедрения, результатам "
+        "и техническому заданию используйте QR-код, представленный "
+        "ниже, или перейдите по адресу: "
+        "https://campusplus.onrender.com/vkr")
     add_empty(doc)
     add_figure(doc, DIAGRAMS / "qr_vkr_materials.png",
-               "Рисунок Ж.1 – QR-код доступа к материалам ВКР", width_cm=8)
+               "Рисунок Ж.1 – QR-код доступа к материалам ВКР",
+               width_cm=8)
 
-    # ── SAVE ────────────────────────────────────────────────────
+    # ── SAVE ────────────────────────────────────────────────
     doc.save(str(OUTPUT))
     print(f"\n✓ Отчёт сохранён: {OUTPUT}")
     print(f"  Размер: {OUTPUT.stat().st_size / 1024:.0f} КБ")
+    print(f"  Абзацев: {len(doc.paragraphs)}")
+    print(f"  Таблиц: {len(doc.tables)}")
 
 
 if __name__ == "__main__":
