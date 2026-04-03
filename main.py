@@ -1110,6 +1110,8 @@ from app.api import router as api_router  # noqa: E402
 app.include_router(api_router)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")
+app.mount("/presentation_assets", StaticFiles(directory=str(BASE_DIR / "presentation_assets")), name="presentation_assets")
+app.mount("/mobile_screens", StaticFiles(directory=str(BASE_DIR / "mobile_screens")), name="mobile_screens")
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
 
@@ -1926,7 +1928,11 @@ def vkr_portal_page(request: Request):
 @app.get("/presentation", response_class=HTMLResponse)
 def presentation_page():
     pres_path = Path(__file__).parent / "campusplus_presentation_vkr_2026.html"
-    return HTMLResponse(pres_path.read_text(encoding="utf-8"))
+    html = pres_path.read_text(encoding="utf-8")
+    html = html.replace('src="app/static/', 'src="/static/')
+    html = html.replace('src="presentation_assets/', 'src="/presentation_assets/')
+    html = html.replace('src="mobile_screens/', 'src="/mobile_screens/')
+    return HTMLResponse(html)
 
 
 @app.get("/vkr/aprobation", response_class=HTMLResponse)
