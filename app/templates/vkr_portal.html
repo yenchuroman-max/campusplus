@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="vkr-hub">
+  <article class="vkr-hub-card card">
+    <span class="spotlight-tag">ВКР · Материалы</span>
+    <h1>Материалы по ВКР</h1>
+    <div class="evidence-route">https://campusplus.sgugit.ru/vkr</div>
+  </article>
+</section>
+
+<section class="vkr-accordion" id="vkrAccordion">
+  {% for section in sections %}
+    <details class="vkr-acc-item card" {% if loop.first %}open{% endif %}>
+      <summary class="vkr-acc-header">
+        <span class="vkr-acc-num">{{ "%02d"|format(loop.index) }}</span>
+        <span class="vkr-acc-title">{{ section.title }}</span>
+        <span class="vkr-acc-badge">{{ section.kicker }}</span>
+        <svg class="vkr-acc-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="vkr-acc-body">
+        <p class="vkr-acc-desc">{{ section.description }}</p>
+
+        {% if section.manual_cases %}
+          <div class="vkr-acc-cases">
+            {% for case in section.manual_cases %}
+              <details class="vkr-case-item">
+                <summary class="vkr-case-header">
+                  <span class="vkr-case-id">{{ case.id }}</span>
+                  <span class="vkr-case-title">{{ case.title }}</span>
+                  <span class="vkr-case-role">{{ case.role }}</span>
+                </summary>
+                <div class="vkr-case-body">
+                  <p class="vkr-case-goal"><strong>Цель:</strong> {{ case.goal }}</p>
+                  <div class="vkr-case-block">
+                    <h4>Шаги</h4>
+                    <ol>
+                      {% for step in case.steps %}
+                        <li>{{ step }}</li>
+                      {% endfor %}
+                    </ol>
+                  </div>
+                  <div class="vkr-case-block">
+                    <h4>Ожидаемый результат</h4>
+                    <p>{{ case.expected }}</p>
+                  </div>
+                </div>
+              </details>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {% if section.file_url %}
+          <a class="btn" href="{{ section.file_url }}" target="_blank" rel="noopener">{{ section.file_label }}</a>
+        {% endif %}
+      </div>
+    </details>
+  {% endfor %}
+</section>
+{% endblock %}

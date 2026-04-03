@@ -283,3 +283,190 @@ $env:OPENAI_MODEL="gpt-4.1"
 - Нет миграций БД (используется `CREATE TABLE IF NOT EXISTS`).
 - Логика авторизации/ролей базовая, без granular permissions.
 - Для Word поддерживается формат `.docx` (старый `.doc` не поддерживается).
+
+## SQL-задачи для практики ручного тестирования
+
+Ниже 10 задач по реальной БД проекта CampusPlus. Все примеры написаны в простом SQL без специфичных функций, чтобы запросы можно было запускать и на SQLite, и на PostgreSQL. В условиях используй свои реальные значения групп, преподавателей, дисциплин и логинов.
+
+### Задача #1.
+**Суть задачи:**  
+Выбери всех пользователей с ролью `student` из группы `БИ-41.1`, отсортируй их по ФИО.
+
+```sql
+SELECT id, full_name, email, student_group
+FROM users
+WHERE role = 'student'
+  AND student_group = 'БИ-41.1'
+ORDER BY full_name;
+```
+
+### Задача #2.
+**Суть задачи:**  
+Выведи список преподавателей и дисциплин, которые за ними закреплены.
+
+```sql
+SELECT
+    u.id AS teacher_id,
+    u.full_name AS teacher_name,
+    u.email AS teacher_email,
+    d.id AS discipline_id,
+    d.name AS discipline_name
+FROM teacher_disciplines td
+JOIN users u ON u.id = td.teacher_id
+JOIN disciplines d ON d.id = td.discipline_id
+WHERE u.role = 'teacher'
+ORDER BY u.full_name, d.name;
+```
+
+### Задача #3.
+**Суть задачи:**  
+Покажи, какие группы имеют доступ к дисциплине `Администрирование информационных систем`, и какой преподаватель ведёт эту дисциплину у каждой группы.
+
+```sql
+SELECT
+    d.name AS discipline_name,
+    ta.group_name,
+    u.full_name AS teacher_name,
+    u.email AS teacher_email
+FROM teaching_assignments ta
+JOIN disciplines d ON d.id = ta.discipline_id
+JOIN users u ON u.id = ta.teacher_id
+WHERE d.name = 'Администрирование информационных систем'
+ORDER BY ta.group_name, u.full_name;
+```
+
+### Задача #4.
+**Суть задачи:**  
+Найди все опубликованные тесты, укажи название теста, лекции, дисциплины и преподавателя, который их создал.
+
+```sql
+SELECT
+    t.id AS test_id,
+    t.title AS test_title,
+    l.title AS lecture_title,
+    d.name AS discipline_name,
+    u.full_name AS teacher_name,
+    t.created_at
+FROM tests t
+JOIN lectures l ON l.id = t.lecture_id
+LEFT JOIN disciplines d ON d.id = l.discipline_id
+JOIN users u ON u.id = l.teacher_id
+WHERE t.status = 'published'
+ORDER BY t.created_at DESC, t.id DESC;
+```
+
+### Задача #5.
+**Суть задачи:**  
+Покажи все попытки прохождения тестов студентами: кто проходил, какой тест, на сколько баллов и когда.
+
+```sql
+SELECT
+    a.id AS attempt_id,
+    s.full_name AS student_name,
+    s.email AS student_email,
+    t.title AS test_title,
+    a.score,
+    a.taken_at
+FROM attempts a
+JOIN users s ON s.id = a.student_id
+JOIN tests t ON t.id = a.test_id
+WHERE s.role = 'student'
+ORDER BY a.taken_at DESC, a.id DESC;
+```
+
+### Задача #6.
+**Суть задачи:**  
+Найди студентов, которые проходили тесты на результат ниже `60` баллов. Покажи студента, тест, дисциплину и балл.
+
+```sql
+SELECT
+    s.full_name AS student_name,
+    s.student_group,
+    t.title AS test_title,
+    d.name AS discipline_name,
+    a.score,
+    a.taken_at
+FROM attempts a
+JOIN users s ON s.id = a.student_id
+JOIN tests t ON t.id = a.test_id
+JOIN lectures l ON l.id = t.lecture_id
+LEFT JOIN disciplines d ON d.id = l.discipline_id
+WHERE a.score < 60
+ORDER BY a.score ASC, a.taken_at DESC;
+```
+
+### Задача #7.
+**Суть задачи:**  
+Посчитай, сколько лекций и сколько тестов есть по каждой дисциплине.
+
+```sql
+SELECT
+    d.name AS discipline_name,
+    COUNT(DISTINCT l.id) AS lectures_count,
+    COUNT(DISTINCT t.id) AS tests_count
+FROM disciplines d
+LEFT JOIN lectures l ON l.discipline_id = d.id
+LEFT JOIN tests t ON t.lecture_id = l.id
+GROUP BY d.id, d.name
+ORDER BY d.name;
+```
+
+### Задача #8.
+**Суть задачи:**  
+Покажи топ-5 студентов по среднему баллу за все попытки.
+
+```sql
+SELECT
+    s.id AS student_id,
+    s.full_name AS student_name,
+    s.student_group,
+    ROUND(AVG(a.score), 2) AS avg_score,
+    COUNT(a.id) AS attempts_count
+FROM users s
+JOIN attempts a ON a.student_id = s.id
+WHERE s.role = 'student'
+GROUP BY s.id, s.full_name, s.student_group
+ORDER BY avg_score DESC, attempts_count DESC, s.full_name
+LIMIT 5;
+```
+
+### Задача #9.
+**Суть задачи:**  
+Покажи все ошибочные ответы конкретного студента: какой тест, какой вопрос, индекс выбранного ответа и индекс правильного ответа.
+
+```sql
+SELECT
+    s.full_name AS student_name,
+    t.title AS test_title,
+    q.text AS question_text,
+    ans.selected_index,
+    q.correct_index,
+    a.taken_at
+FROM answers ans
+JOIN attempts a ON a.id = ans.attempt_id
+JOIN users s ON s.id = a.student_id
+JOIN questions q ON q.id = ans.question_id
+JOIN tests t ON t.id = a.test_id
+WHERE s.email = 'student@example.com'
+  AND ans.is_correct = 0
+ORDER BY a.taken_at DESC, t.title, q.id;
+```
+
+### Задача #10.
+**Суть задачи:**  
+Покажи группы, преподавателей и дисциплины, которые они ведут именно у этих групп. Это задача на несколько `JOIN`, чтобы проверить понимание связей в проекте.
+
+```sql
+SELECT
+    gt.group_name,
+    u.full_name AS teacher_name,
+    u.email AS teacher_email,
+    d.name AS discipline_name
+FROM group_teachers gt
+JOIN users u ON u.id = gt.teacher_id
+LEFT JOIN teaching_assignments ta
+       ON ta.teacher_id = gt.teacher_id
+      AND ta.group_name = gt.group_name
+LEFT JOIN disciplines d ON d.id = ta.discipline_id
+ORDER BY gt.group_name, u.full_name, d.name;
+```

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="vkr-doc-header">
+  <article class="card vkr-doc-hero">
+    <span class="spotlight-tag">{{ page.kicker }}</span>
+    <h1>{{ page.heading }}</h1>
+    <p class="vkr-doc-lead">{{ page.description }}</p>
+    <div class="vkr-doc-actions">
+      <a class="btn btn-ghost" href="/vkr">Назад в раздел ВКР</a>
+      {% if page.file_url %}
+        <a class="btn" href="{{ page.file_url }}" target="_blank" rel="noopener">Открыть файл</a>
+      {% endif %}
+    </div>
+  </article>
+</section>
+
+{% if manual_cases %}
+  <section class="manual-case-grid">
+    {% for case in manual_cases %}
+      <article class="card manual-case-card">
+        <div class="manual-case-top">
+          <span class="spotlight-tag">{{ case.id }}</span>
+          <span class="manual-case-role">{{ case.role }}</span>
+        </div>
+        <h3>{{ case.title }}</h3>
+        <p class="manual-case-goal">{{ case.goal }}</p>
+        <div class="manual-case-block">
+          <h4>Шаги</h4>
+          <ol>
+            {% for step in case.steps %}
+              <li>{{ step }}</li>
+            {% endfor %}
+          </ol>
+        </div>
+        <div class="manual-case-block">
+          <h4>Ожидаемый результат</h4>
+          <p>{{ case.expected }}</p>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="vkr-preview-grid">
+    <article class="card vkr-preview-card">
+      <div class="vkr-preview-meta">
+        <span class="spotlight-tag">Публичный материал</span>
+        <div class="evidence-route">{{ public_url }}</div>
+      </div>
+      <div class="vkr-preview-frame">
+        <img src="{{ page.file_url }}" alt="{{ page.title }}">
+      </div>
+    </article>
+  </section>
+{% endif %}
+{% endblock %}

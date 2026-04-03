@@ -1080,7 +1080,20 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
-_session_secret = os.environ.get("SESSION_SECRET_KEY") or os.environ.get("SECRET_KEY") or "dev-secret-change-me"
+_session_secret = os.environ.get("SESSION_SECRET_KEY") or os.environ.get("SECRET_KEY") or ""
+if not _session_secret:
+    import warnings
+    _session_secret = "dev-secret-change-me"
+    warnings.warn(
+        "SESSION_SECRET_KEY not set — using insecure default. "
+        "Set SESSION_SECRET_KEY env var in production!",
+        stacklevel=1,
+    )
+    if os.environ.get("RENDER") or os.environ.get("DATABASE_URL"):
+        raise RuntimeError(
+            "FATAL: SESSION_SECRET_KEY must be set in production. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+        )
 _session_cookie_secure, _session_cookie_samesite, _session_cookie_max_age = _session_cookie_settings()
 _session_cookie_name = "campusplus_session"
 app.add_middleware(
@@ -1227,7 +1240,357 @@ def render(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse
     base["csrf_token"] = generate_csrf_token(request.session)
     base["global_search_query"] = (request.query_params.get("q") or "").strip()
     base.update(context)
-    return templates.TemplateResponse(name, base)
+    return templates.TemplateResponse(request, name, base)
+
+
+VKR_PUBLIC_BASE_URL = "https://campusplus.sgugit.ru"
+VKR_MANUAL_TEST_CASES: list[dict[str, Any]] = [
+    {
+        "id": "TC-01",
+        "title": "Авторизация преподавателя",
+        "role": "Преподаватель",
+        "goal": "Проверить успешный вход преподавателя в рабочий контур.",
+        "steps": [
+            "Открыть страницу авторизации сервиса.",
+            "Ввести корректный логин и пароль преподавателя.",
+            "Нажать кнопку «Войти».",
+        ],
+        "expected": "Пользователь авторизуется и попадает в панель преподавателя без ошибок доступа.",
+    },
+    {
+        "id": "TC-02",
+        "title": "Создание дисциплины преподавателем",
+        "role": "Преподаватель",
+        "goal": "Проверить создание новой дисциплины из интерфейса преподавателя.",
+        "steps": [
+            "Перейти в раздел «Дисциплины».",
+            "Ввести название новой дисциплины.",
+            "Нажать кнопку добавления дисциплины.",
+        ],
+        "expected": "Новая дисциплина отображается в списке дисциплин преподавателя.",
+    },
+    {
+        "id": "TC-03",
+        "title": "Создание лекции и публикация теста",
+        "role": "Преподаватель",
+        "goal": "Проверить создание лекции, теста и публикацию доступа по QR-коду.",
+        "steps": [
+            "Открыть раздел «Лекции и тесты» выбранной дисциплины.",
+            "Создать лекцию и сохранить материал.",
+            "Создать тест и опубликовать его.",
+        ],
+        "expected": "Тест отображается в списке опубликованных и доступен для прохождения студентом.",
+    },
+    {
+        "id": "TC-04",
+        "title": "Регистрация студента",
+        "role": "Студент",
+        "goal": "Проверить регистрацию нового студента с выбором группы.",
+        "steps": [
+            "Открыть страницу регистрации.",
+            "Заполнить ФИО, логин, пароль и выбрать группу.",
+            "Подтвердить регистрацию.",
+        ],
+        "expected": "Студент создаётся в системе и может выполнить вход под своими учётными данными.",
+    },
+    {
+        "id": "TC-05",
+        "title": "Прохождение теста студентом",
+        "role": "Студент",
+        "goal": "Проверить успешное прохождение опубликованного теста.",
+        "steps": [
+            "Открыть тест по QR-коду или из списка доступных тестов.",
+            "Ответить на вопросы теста.",
+            "Нажать кнопку отправки результата.",
+        ],
+        "expected": "Результат фиксируется, студенту отображается набранный балл.",
+    },
+    {
+        "id": "TC-06",
+        "title": "Просмотр аналитики студентом",
+        "role": "Студент",
+        "goal": "Проверить отображение истории тестирования и точек роста.",
+        "steps": [
+            "Открыть личный кабинет студента.",
+            "Перейти в раздел аналитики после прохождения теста.",
+        ],
+        "expected": "Отображаются история попыток, баллы и темы для повторения.",
+    },
+    {
+        "id": "TC-07",
+        "title": "Мониторинг успеваемости преподавателем",
+        "role": "Преподаватель",
+        "goal": "Проверить появление студента и его результата в аналитике преподавателя.",
+        "steps": [
+            "Открыть раздел «Студенты» после прохождения теста студентом.",
+            "Перейти в раздел «Успеваемость».",
+            "Выбрать нужную дисциплину или просмотр всех дисциплин.",
+        ],
+        "expected": "Студент отображается в списке и в преподавательской аналитике с корректным баллом.",
+    },
+    {
+        "id": "TC-08",
+        "title": "Сброс пароля администратором",
+        "role": "Администратор",
+        "goal": "Проверить выдачу временного пароля пользователю.",
+        "steps": [
+            "Открыть карточку пользователя в административном интерфейсе.",
+            "Нажать кнопку сброса пароля.",
+            "Передать временный пароль пользователю и выполнить повторный вход.",
+        ],
+        "expected": "Пользователь входит по временному паролю и принудительно меняет его в личном кабинете.",
+    },
+    {
+        "id": "TC-09",
+        "title": "AI-генерация теста по лекции",
+        "role": "Преподаватель",
+        "goal": "Проверить корректность автоматической генерации тестовых вопросов на основе текста лекции.",
+        "steps": [
+            "Открыть раздел лекций выбранной дисциплины.",
+            "Выбрать лекцию с достаточным объёмом текста.",
+            "Нажать «Сгенерировать тест» и дождаться результата.",
+        ],
+        "expected": "Система формирует набор вопросов, каждый содержит текст, варианты ответов и отмеченный правильный ответ.",
+    },
+    {
+        "id": "TC-10",
+        "title": "Ручное создание теста",
+        "role": "Преподаватель",
+        "goal": "Проверить создание теста через ручной конструктор вопросов.",
+        "steps": [
+            "Перейти к созданию теста вручную для выбранной лекции.",
+            "Добавить несколько вопросов с вариантами ответов.",
+            "Указать правильные ответы и сохранить тест.",
+        ],
+        "expected": "Тест сохраняется с корректными вопросами и вариантами, доступен для публикации.",
+    },
+    {
+        "id": "TC-11",
+        "title": "Редактирование вопросов теста",
+        "role": "Преподаватель",
+        "goal": "Проверить возможность редактирования вопросов после создания теста.",
+        "steps": [
+            "Открыть ранее созданный тест.",
+            "Изменить текст вопроса и варианты ответов.",
+            "Сохранить изменения.",
+        ],
+        "expected": "Обновлённые вопросы корректно сохраняются и отображаются при повторном открытии теста.",
+    },
+    {
+        "id": "TC-12",
+        "title": "QR-код доступа к тесту",
+        "role": "Преподаватель",
+        "goal": "Проверить генерацию QR-кода для опубликованного теста.",
+        "steps": [
+            "Опубликовать тест.",
+            "Перейти на страницу QR-кода теста.",
+            "Отсканировать QR-код с мобильного устройства.",
+        ],
+        "expected": "QR-код ведёт на страницу прохождения опубликованного теста без дополнительной авторизации.",
+    },
+    {
+        "id": "TC-13",
+        "title": "Просмотр точек роста студентом",
+        "role": "Студент",
+        "goal": "Проверить отображение слабых тем и рекомендаций после прохождения тестов.",
+        "steps": [
+            "Пройти несколько тестов по разным лекциям.",
+            "Перейти в раздел «Точки роста» в личном кабинете.",
+        ],
+        "expected": "Система отображает темы, по которым допущены ошибки, и рекомендации для повторения.",
+    },
+    {
+        "id": "TC-14",
+        "title": "Управление группами администратором",
+        "role": "Администратор",
+        "goal": "Проверить создание, редактирование и удаление учебных групп.",
+        "steps": [
+            "Открыть раздел «Группы» в административной панели.",
+            "Создать новую группу с уникальным названием.",
+            "Проверить отображение группы в списке.",
+        ],
+        "expected": "Группа создаётся, отображается в списке и доступна для назначения преподавателей.",
+    },
+    {
+        "id": "TC-15",
+        "title": "Назначение дисциплины группе",
+        "role": "Преподаватель",
+        "goal": "Проверить привязку дисциплины к учебной группе.",
+        "steps": [
+            "Открыть раздел «Дисциплины» в панели преподавателя.",
+            "Выбрать дисциплину и назначить её группе.",
+            "Проверить отображение назначения в интерфейсе.",
+        ],
+        "expected": "Группа привязана к дисциплине, студенты группы получают доступ к тестам дисциплины.",
+    },
+    {
+        "id": "TC-16",
+        "title": "Ролевое ограничение доступа",
+        "role": "Студент",
+        "goal": "Проверить, что студент не может получить доступ к преподавательским и административным страницам.",
+        "steps": [
+            "Авторизоваться как студент.",
+            "Попытаться открыть URL панели преподавателя.",
+            "Попытаться открыть URL административной панели.",
+        ],
+        "expected": "Сервис перенаправляет пользователя на страницу входа или отображает сообщение об ошибке доступа.",
+    },
+    {
+        "id": "TC-17",
+        "title": "Повторное прохождение теста",
+        "role": "Студент",
+        "goal": "Проверить корректность фиксации нескольких попыток прохождения одного теста.",
+        "steps": [
+            "Пройти опубликованный тест.",
+            "Вернуться к тесту и пройти его повторно.",
+            "Проверить историю попыток в аналитике.",
+        ],
+        "expected": "Каждая попытка фиксируется отдельно, аналитика отображает все результаты.",
+    },
+    {
+        "id": "TC-18",
+        "title": "Поиск лекций по ключевому слову",
+        "role": "Преподаватель",
+        "goal": "Проверить работу поиска по заголовкам и содержимому лекций.",
+        "steps": [
+            "Перейти в раздел поиска.",
+            "Ввести ключевое слово, содержащееся в одной из лекций.",
+            "Проверить результаты поиска.",
+        ],
+        "expected": "Система находит и отображает лекции, содержащие искомое ключевое слово.",
+    },
+    {
+        "id": "TC-19",
+        "title": "Смена пароля пользователем",
+        "role": "Студент",
+        "goal": "Проверить самостоятельную смену пароля через личный кабинет.",
+        "steps": [
+            "Авторизоваться в системе.",
+            "Открыть настройки профиля.",
+            "Ввести текущий и новый пароль, подтвердить изменение.",
+        ],
+        "expected": "Пароль изменяется, следующий вход выполняется по новому паролю.",
+    },
+    {
+        "id": "TC-20",
+        "title": "Привязка преподавателя к группе",
+        "role": "Администратор",
+        "goal": "Проверить назначение преподавателя куратором учебной группы.",
+        "steps": [
+            "Открыть карточку группы в административной панели.",
+            "Назначить преподавателя из списка пользователей.",
+            "Проверить, что преподаватель видит группу в своём интерфейсе.",
+        ],
+        "expected": "Преподаватель получает доступ к группе и может работать с её студентами.",
+    },
+]
+VKR_EVIDENCE_PAGES: dict[str, dict[str, Any]] = {
+    "aprobation": {
+        "slug": "aprobation",
+        "route": "/vkr/aprobation",
+        "title": "Апробация проекта",
+        "kicker": "ВКР · Апробация",
+        "portal_title": "Апробация",
+        "portal_description": "Скриншоты испытаний и материалы по апробации проекта.",
+        "heading": "Материалы апробации проекта",
+        "description": "Раздел содержит подтверждающие материалы по проведению апробации веб-сервиса.",
+        "file_url": "/static/vkr/aprobation-sheet.svg",
+        "file_label": "Открыть материал апробации",
+    },
+    "implementation-act": {
+        "slug": "implementation-act",
+        "route": "/vkr/implementation-act",
+        "title": "Акт внедрения",
+        "kicker": "ВКР · Акт внедрения",
+        "portal_title": "Акт внедрения",
+        "portal_description": "Акт внедрения и сопроводительные документы.",
+        "heading": "Акт внедрения",
+        "description": "По кнопке открывается файл акта внедрения. В дальнейшем сюда подставляется реальный скан документа.",
+        "file_url": "/static/vkr/implementation-act-sheet.svg",
+        "file_label": "Открыть акт внедрения",
+    },
+    "results": {
+        "slug": "results",
+        "route": "/vkr/results",
+        "title": "Результаты внедрения",
+        "kicker": "ВКР · Результаты внедрения",
+        "portal_title": "Результаты внедрения",
+        "portal_description": "Итоговые скриншоты и материалы по результатам внедрения.",
+        "heading": "Результаты внедрения",
+        "description": "Раздел предназначен для публикации итоговых материалов по эксплуатации сервиса.",
+        "file_url": "/static/vkr/results-sheet.svg",
+        "file_label": "Открыть результаты внедрения",
+    },
+    "testing": {
+        "slug": "testing",
+        "route": "/vkr/testing",
+        "title": "Тестирование",
+        "kicker": "ВКР · Тестирование",
+        "portal_title": "Тестирование",
+        "portal_description": "Ручные тест-кейсы по ключевым пользовательским сценариям.",
+        "heading": "Ручные тест-кейсы",
+        "description": "На странице собраны основные сценарии ручного тестирования веб-сервиса.",
+    },
+    "specification": {
+        "slug": "specification",
+        "route": "/vkr/specification",
+        "title": "Техническое задание",
+        "kicker": "ВКР · Техническое задание",
+        "portal_title": "Техническое задание",
+        "portal_description": "Техническое задание и исходные требования к системе.",
+        "heading": "Техническое задание",
+        "description": "По кнопке открывается файл технического задания. Позже сюда подставляется утверждённый документ.",
+        "file_url": "/static/vkr/specification-sheet.svg",
+        "file_label": "Открыть техническое задание",
+    },
+    "certificates": {
+        "slug": "certificates",
+        "route": "/vkr/certificates",
+        "title": "Сертификаты и приложения",
+        "kicker": "ВКР · Сертификаты",
+        "portal_title": "Сертификаты",
+        "portal_description": "Сертификаты, приложения и сопровождающие материалы.",
+        "heading": "Сертификаты и приложения",
+        "description": "По кнопке открывается файл с приложениями и подтверждающими материалами.",
+        "file_url": "/static/vkr/certificates-sheet.svg",
+        "file_label": "Открыть сертификаты и приложения",
+    },
+}
+
+
+def _render_vkr_evidence_page(request: Request, slug: str) -> HTMLResponse:
+    page = VKR_EVIDENCE_PAGES[slug]
+    public_url = f"{VKR_PUBLIC_BASE_URL}{page['route']}"
+    return render(
+        request,
+        "vkr_evidence_page.html",
+        {
+            "title": page["title"],
+            "is_index": False,
+            "page": page,
+            "public_url": public_url,
+            "manual_cases": VKR_MANUAL_TEST_CASES if slug == "testing" else [],
+        },
+    )
+
+
+def _build_vkr_portal_sections() -> list[dict[str, str]]:
+    order = ["aprobation", "testing", "specification", "implementation-act", "results", "certificates"]
+    sections: list[dict[str, str]] = []
+    for slug in order:
+        page = VKR_EVIDENCE_PAGES[slug]
+        sections.append(
+            {
+                "title": page["portal_title"],
+                "description": page["portal_description"],
+                "route": page["route"],
+                "kicker": page["kicker"],
+                "file_url": page.get("file_url", ""),
+                "file_label": page.get("file_label", ""),
+                "manual_cases": VKR_MANUAL_TEST_CASES if slug == "testing" else [],
+            }
+        )
+    return sections
 
 
 def _merge_vary_cookie(headers) -> None:
@@ -1250,6 +1613,15 @@ async def disable_cache_for_dynamic_pages(request: Request, call_next):
     response.headers["Expires"] = "0"
     _merge_vary_cookie(response.headers)
     return response
+
+
+# ── CSRF-верификация (вспомогательная функция для эндпоинтов) ────
+def _check_csrf(session: dict, form_data) -> bool:
+    """Проверяет CSRF-токен из формы. Вызывается в POST-эндпоинтах вручную."""
+    token = form_data.get(CSRF_FIELD_NAME)
+    if not token:
+        return False
+    return verify_csrf_token(session, token)
 
 
 def add_flash(request: Request, message: str, level: str = "info") -> None:
@@ -1535,6 +1907,50 @@ def index(request: Request):
         "index.html",
         {"is_index": True, "title": "КампусПлюс СГУГиТ", "main_chart": chart_data},
     )
+
+
+@app.get("/vkr", response_class=HTMLResponse)
+def vkr_portal_page(request: Request):
+    return render(
+        request,
+        "vkr_portal.html",
+        {
+            "title": "Материалы ВКР",
+            "is_index": False,
+            "public_url": f"{VKR_PUBLIC_BASE_URL}/vkr",
+            "sections": _build_vkr_portal_sections(),
+        },
+    )
+
+
+@app.get("/vkr/aprobation", response_class=HTMLResponse)
+def vkr_aprobation_page(request: Request):
+    return _render_vkr_evidence_page(request, "aprobation")
+
+
+@app.get("/vkr/testing", response_class=HTMLResponse)
+def vkr_testing_page(request: Request):
+    return _render_vkr_evidence_page(request, "testing")
+
+
+@app.get("/vkr/specification", response_class=HTMLResponse)
+def vkr_specification_page(request: Request):
+    return _render_vkr_evidence_page(request, "specification")
+
+
+@app.get("/vkr/certificates", response_class=HTMLResponse)
+def vkr_certificates_page(request: Request):
+    return _render_vkr_evidence_page(request, "certificates")
+
+
+@app.get("/vkr/implementation-act", response_class=HTMLResponse)
+def vkr_implementation_act_page(request: Request):
+    return _render_vkr_evidence_page(request, "implementation-act")
+
+
+@app.get("/vkr/results", response_class=HTMLResponse)
+def vkr_results_page(request: Request):
+    return _render_vkr_evidence_page(request, "results")
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -2316,8 +2732,21 @@ async def new_lecture(
     saved_filename: str | None = None
     if lecture_file and (lecture_file.filename or "").strip():
         try:
-            # Читаем файл и извлекаем текст в отдельном потоке, чтобы не блокировать сервер
+            # Ограничение размера загружаемого файла (50 МБ)
+            MAX_UPLOAD_SIZE = 50 * 1024 * 1024
             raw_bytes = await lecture_file.read()
+            if len(raw_bytes) > MAX_UPLOAD_SIZE:
+                return render(
+                    request,
+                    "lecture_new.html",
+                    {
+                        "error": "Файл слишком большой. Максимальный размер — 50 МБ.",
+                        "teachers": teachers,
+                        "disciplines": disciplines,
+                        "teacher_discipline_options": teacher_discipline_options,
+                        "selected_discipline_id": None,
+                    },
+                )
             original_name = lecture_file.filename or "file"
 
             loop = asyncio.get_event_loop()
@@ -2428,7 +2857,14 @@ def download_lecture_file(request: Request, lecture_id: int):
     fname = lecture["original_filename"] if "original_filename" in lecture.keys() else None
     if not fname:
         return HTMLResponse("Оригинальный файл не найден.", status_code=404)
-    file_path = UPLOADS_DIR / fname
+    # Защита от path-traversal: берём только имя файла
+    safe_fname = Path(fname).name
+    if safe_fname != fname:
+        return HTMLResponse("Некорректное имя файла.", status_code=400)
+    file_path = UPLOADS_DIR / safe_fname
+    # Дополнительная проверка: resolve-путь внутри UPLOADS_DIR
+    if not file_path.resolve().is_relative_to(UPLOADS_DIR.resolve()):
+        return HTMLResponse("Доступ запрещён.", status_code=403)
     if not file_path.exists():
         return HTMLResponse("Файл был удалён с сервера.", status_code=404)
     # Определяем имя для скачивания на основе названия лекции

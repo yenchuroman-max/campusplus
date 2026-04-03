@@ -562,7 +562,9 @@ def api_ai_status():
     from app.ai import diagnose_ai_setup
     msg = diagnose_ai_setup()
     ok = "настроен" in msg.lower() or "ok" in msg.lower() or "ключ" in msg.lower()
-    return {"ok": ok, "message": msg}
+    # Не раскрываем детали ошибок AI-провайдера во внешний интерфейс
+    safe_msg = "AI-провайдер настроен и готов к работе." if ok else "AI-провайдер недоступен."
+    return {"ok": ok, "message": safe_msg}
 
 
 # ═══════════════════════════════════════════════════════════════
