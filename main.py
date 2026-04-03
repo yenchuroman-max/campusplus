@@ -1245,7 +1245,7 @@ def render(request: Request, name: str, context: dict[str, Any]) -> HTMLResponse
     return templates.TemplateResponse(request, name, base)
 
 
-VKR_PUBLIC_BASE_URL = "https://campusplus.sgugit.ru"
+VKR_PUBLIC_BASE_URL = "https://campusplus.onrender.com"
 VKR_MANUAL_TEST_CASES: list[dict[str, Any]] = [
     {
         "id": "TC-01",
