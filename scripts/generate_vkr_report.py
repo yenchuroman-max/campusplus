@@ -283,7 +283,7 @@ def main():
     add_empty(doc)
     add_center(doc, "Кафедра прикладной информатики "
                "и информационных систем")
-    add_empty(doc, 2)
+    add_empty(doc)
     add_center(doc, "Выпускная квалификационная работа "
                "соответствует установленным требованиям "
                "и направляется в ГЭК для защиты")
@@ -299,7 +299,7 @@ def main():
         "РАЗРАБОТКА ВЕБ-СЕРВИСА ДЛЯ МОНИТОРИНГА УСПЕВАЕМОСТИ "
         "С ПРИМЕНЕНИЕМ ТЕХНОЛОГИЙ ИСКУССТВЕННОГО ИНТЕЛЛЕКТА",
         size=20, bold=True)
-    add_empty(doc, 2)
+    add_empty(doc)
     add_text(doc, "Выпускник\t\t\tР. В. Енчу",
              align=WD_ALIGN_PARAGRAPH.JUSTIFY)
     add_empty(doc)
@@ -308,7 +308,7 @@ def main():
     add_empty(doc)
     add_text(doc, "Нормоконтролер\t\tС. Ю. Кацко",
              align=WD_ALIGN_PARAGRAPH.JUSTIFY)
-    add_empty(doc, 3)
+    add_empty(doc, 2)
     add_center(doc, "Новосибирск – 2026")
 
     doc.add_page_break()
@@ -401,7 +401,6 @@ def main():
 
     # ── РЕФЕРАТ ────────────────────────────────────────────────
     add_center(doc, "РЕФЕРАТ", size=20, bold=True)
-    add_empty(doc)
     add_body(doc,
         "Енчу Роман Викторович. Разработка веб-сервиса для мониторинга "
         "успеваемости с применением технологий искусственного интеллекта.")
@@ -415,8 +414,7 @@ def main():
         "2026 г., 09.03.02 «Информационные системы и технологии», "
         "программа бакалавриата.")
     add_body(doc,
-        "80 с., 2 табл., 28 рис., 25 источников, 7 приложений.")
-    add_empty(doc)
+        "80 с., 3 табл., 28 рис., 25 источников, 7 приложений.")
     add_body(doc,
         "Целью выпускной квалификационной работы является разработка "
         "веб-сервиса для мониторинга успеваемости с применением технологий "
@@ -440,7 +438,6 @@ def main():
 
     # ── ОГЛАВЛЕНИЕ ─────────────────────────────────────────────
     add_center(doc, "ОГЛАВЛЕНИЕ", size=20, bold=True)
-    add_empty(doc)
     add_toc_field(doc)
     doc.add_page_break()
 
@@ -448,7 +445,6 @@ def main():
     #  ВВЕДЕНИЕ
     # ══════════════════════════════════════════════════════════
     add_heading1(doc, "ВВЕДЕНИЕ")
-    add_empty(doc)
 
     add_body(doc,
         "Современный образовательный процесс в высших учебных заведениях "
@@ -789,7 +785,6 @@ def main():
         for ci, val in enumerate(rd):
             table.rows[ri + 1].cells[ci].text = val
     format_table(table, col_widths_cm=[4.5, 3.0, 3.0, 3.0, 3.0])
-    add_empty(doc)
 
     add_body(doc,
         "Результаты сравнительного анализа показывают, что ни одно "
@@ -895,7 +890,6 @@ def main():
         for ci, val in enumerate(rd):
             table2.rows[ri + 1].cells[ci].text = val
     format_table(table2, col_widths_cm=[4.5, 3.0, 3.0, 3.0, 3.0])
-    add_empty(doc)
 
     add_body(doc,
         "Дополнительно в проекте используются следующие технологии:")
@@ -1360,7 +1354,6 @@ def main():
     #  ЗАКЛЮЧЕНИЕ
     # ══════════════════════════════════════════════════════════
     add_heading1(doc, "ЗАКЛЮЧЕНИЕ")
-    add_empty(doc)
 
     add_body(doc,
         "В ходе выполнения выпускной квалификационной работы "
@@ -1413,7 +1406,6 @@ def main():
     #  СПИСОК ЛИТЕРАТУРЫ
     # ══════════════════════════════════════════════════════════
     add_heading1(doc, "СПИСОК ЛИТЕРАТУРЫ")
-    add_empty(doc)
 
     bibliography = [
         "1 Буч, Г. Язык UML. Руководство пользователя : учебное "
@@ -1553,14 +1545,12 @@ def main():
     for letter, title, fig_caption, img_path in appendices:
         add_heading1(doc, f"ПРИЛОЖЕНИЕ {letter}")
         add_center(doc, title, bold=True)
-        add_empty(doc)
         add_figure(doc, img_path, fig_caption, width_cm=16)
         doc.add_page_break()
 
     # Приложение Е — скриншоты
     add_heading1(doc, "ПРИЛОЖЕНИЕ Е")
     add_center(doc, "РЕЗУЛЬТАТЫ РАБОТЫ ПРОГРАММЫ", bold=True)
-    add_empty(doc)
 
     screenshots = [
         (IMAGES / "01_home_desktop.png",
@@ -1588,20 +1578,17 @@ def main():
     ]
     for img_path, caption in screenshots:
         add_figure(doc, img_path, caption, width_cm=15)
-        add_empty(doc)
 
     # Приложение Ж — QR-код
     doc.add_page_break()
     add_heading1(doc, "ПРИЛОЖЕНИЕ Ж")
     add_center(doc, "QR-КОД ДОСТУПА К МАТЕРИАЛАМ ВКР", bold=True)
-    add_empty(doc)
     add_body(doc,
         "Для доступа к материалам выпускной квалификационной "
         "работы — тестовым сценариям, акту внедрения, результатам "
         "и техническому заданию используйте QR-код, представленный "
         "ниже, или перейдите по адресу: "
         "https://campusplus.onrender.com/vkr")
-    add_empty(doc)
     add_figure(doc, DIAGRAMS / "qr_vkr_materials.png",
                "Рисунок Ж.1 – QR-код доступа к материалам ВКР",
                width_cm=8)
