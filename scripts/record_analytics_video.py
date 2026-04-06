@@ -19,10 +19,11 @@ CURSOR_JS = """
 (function(){
   if(document.getElementById('_pw_cur')) return;
   const d=document.createElement('div'); d.id='_pw_cur';
-  d.style.cssText='position:fixed;z-index:999999;pointer-events:none;width:24px;height:24px;'
-    +'transition:left .12s cubic-bezier(.4,0,.2,1),top .12s cubic-bezier(.4,0,.2,1);left:-40px;top:-40px;';
-  d.innerHTML='<svg width="24" height="24" viewBox="0 0 24 24">'
-    +'<path d="M5 3l14 9-7 2-4 7z" fill="#18304f" stroke="#fff" stroke-width="1.5"/></svg>';
+  d.style.cssText='position:fixed;z-index:999999;pointer-events:none;width:40px;height:40px;'
+    +'transition:left .10s cubic-bezier(.4,0,.2,1),top .10s cubic-bezier(.4,0,.2,1);left:-60px;top:-60px;'
+    +'filter:drop-shadow(1px 2px 3px rgba(0,0,0,.45));';
+  d.innerHTML='<svg width="40" height="40" viewBox="0 0 24 24">'
+    +'<path d="M5 3l14 9-7 2-4 7z" fill="#fff" stroke="#18304f" stroke-width="1.2"/></svg>';
   document.body.appendChild(d);
   document.addEventListener('mousemove',e=>{d.style.left=e.clientX+'px';d.style.top=e.clientY+'px';});
 })()
@@ -31,37 +32,45 @@ CURSOR_JS = """
 def inject_cursor(page):
     page.evaluate(CURSOR_JS)
 
-def hd(lo=0.5, hi=1.3):
+def hd(lo=0.6, hi=1.6):
     time.sleep(random.uniform(lo, hi))
+
+def _jitter():
+    return random.uniform(-4, 4)
 
 def human_type(page, selector, text):
     page.click(selector)
-    hd(0.2, 0.4)
-    for ch in text:
-        page.keyboard.type(ch, delay=random.randint(25, 75))
-        time.sleep(random.uniform(0.01, 0.04))
     hd(0.3, 0.6)
+    for ch in text:
+        page.keyboard.type(ch, delay=random.randint(30, 90))
+        if random.random() < 0.08:
+            time.sleep(random.uniform(0.15, 0.35))
+        else:
+            time.sleep(random.uniform(0.02, 0.06))
+    hd(0.4, 0.8)
 
 def move_click(page, selector):
     el = page.locator(selector).first
     el.scroll_into_view_if_needed()
-    hd(0.15, 0.3)
+    hd(0.2, 0.45)
     box = el.bounding_box()
     if box:
-        page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2,
-                         steps=random.randint(12, 22))
-        hd(0.25, 0.55)
+        tx = box["x"] + box["width"]/2 + _jitter()
+        ty = box["y"] + box["height"]/2 + _jitter()
+        page.mouse.move(tx, ty, steps=random.randint(22, 38))
+        hd(0.35, 0.75)
     el.click()
-    hd(0.35, 0.7)
+    hd(0.45, 0.9)
 
 def move_to(page, selector):
     el = page.locator(selector).first
     el.scroll_into_view_if_needed()
     box = el.bounding_box()
     if box:
-        page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2,
-                         steps=random.randint(10, 18))
-    hd(0.3, 0.6)
+        page.mouse.move(box["x"]+box["width"]/2 + _jitter(),
+                         box["y"]+box["height"]/2 + _jitter(),
+                         steps=random.randint(18, 30))
+    hd(0.4, 0.8)
 
 
 def run():
@@ -75,14 +84,28 @@ def run():
         page = ctx.new_page()
         page.set_default_timeout(60000)
 
-        # ═══════ 0. SILENT LOGIN (cookie) ═══════
+        # ═══════ 0. SILENT LOGIN (no visible login page) ═══════
+        # Use API to set session cookie before recording starts
         page.goto(f"{BASE}/login")
         page.wait_for_load_state("networkidle")
         page.fill('input[name="login"]', EMAIL)
         page.fill('input[name="password"]', PASSWORD)
         page.click('button[type="submit"]')
         page.wait_for_load_state("networkidle")
-        hd(0.3, 0.5)
+
+        # Close context, re-open with cookies so recording starts fresh on dashboard
+        cookies = ctx.cookies()
+        ctx.close(); browser.close()
+
+        browser = p.chromium.launch(headless=False)
+        ctx = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            record_video_dir=str(VIDEO_DIR),
+            record_video_size={"width": 1920, "height": 1080},
+        )
+        ctx.add_cookies(cookies)
+        page = ctx.new_page()
+        page.set_default_timeout(60000)
 
         # ═══════ 1. DASHBOARD ═══════
         page.goto(f"{BASE}/dashboard")
@@ -105,9 +128,10 @@ def run():
         for i in range(min(stats.count(), 3)):
             box = stats.nth(i).bounding_box()
             if box:
-                page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2,
-                                 steps=random.randint(10, 16))
-                hd(0.8, 1.2)
+                page.mouse.move(box["x"]+box["width"]/2 + _jitter(),
+                                 box["y"]+box["height"]/2 + _jitter(),
+                                 steps=random.randint(18, 30))
+                hd(0.9, 1.5)
 
         # Scroll to trend chart
         page.evaluate("window.scrollTo({top:350,behavior:'smooth'})")
@@ -122,9 +146,10 @@ def run():
         for i in range(min(rows.count(), 4)):
             box = rows.nth(i).bounding_box()
             if box:
-                page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2,
-                                 steps=random.randint(8, 14))
-                hd(0.5, 1.0)
+                page.mouse.move(box["x"]+box["width"]/2 + _jitter(),
+                                 box["y"]+box["height"]/2 + _jitter(),
+                                 steps=random.randint(14, 24))
+                hd(0.6, 1.2)
 
         # Scroll to bar chart
         page.evaluate("window.scrollTo({top:document.body.scrollHeight*0.75,behavior:'smooth'})")
