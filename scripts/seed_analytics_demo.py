@@ -1,6 +1,7 @@
 """
-Seed 10 students in group БИ-41, assign to discipline 443,
-then have them take the CCNA test (id=9) with varying scores.
+Seed rich analytics data: create 5 tests across 10 days,
+10 students take each test with gradually improving scores
+so the trend chart shows a nice upward curve.
 """
 import json
 import random
@@ -15,7 +16,7 @@ DB = "app/app.db"
 GROUP_NAME = "БИ-41"
 DISCIPLINE_ID = 443
 TEACHER_ID = 2  # teacher1@example.com
-TEST_ID = 9     # CCNA test
+PASSWORD = "Student123!"
 
 # 10 students – gender-consistent Russian names
 STUDENTS = [
@@ -31,10 +32,59 @@ STUDENTS = [
     ("Смирнова Дарья Петровна",         "smir@demo.ru"),
 ]
 
-# Target scores (% correct out of 5 questions): varied range
-TARGET_CORRECT = [5, 4, 4, 3, 3, 3, 2, 2, 1, 0]  # 100%, 80%, 80%, 60%, ...
+# 5 test themes with 5 questions each
+TEST_THEMES = [
+    ("Основы сетевых моделей OSI", [
+        ("Сколько уровней в модели OSI?", ["5","6","7","8"], 2),
+        ("Какой уровень отвечает за маршрутизацию?", ["Канальный","Сетевой","Транспортный","Физический"], 1),
+        ("Протокол HTTP работает на уровне...", ["Сетевом","Транспортном","Прикладном","Сеансовом"], 2),
+        ("Что делает коммутатор?", ["Маршрутизирует пакеты","Коммутирует кадры","Шифрует данные","Сжимает трафик"], 1),
+        ("TCP обеспечивает...", ["Быструю передачу","Надёжную доставку","Шифрование","Маршрутизацию"], 1),
+    ]),
+    ("IP-адресация и подсети", [
+        ("Сколько бит в IPv4-адресе?", ["16","24","32","64"], 2),
+        ("Маска /24 означает...", ["24 бита сети","24 бита хоста","24 подсети","24 маршрутизатора"], 0),
+        ("Адрес 192.168.1.0/24 — это...", ["Хост","Сеть","Широковещательный","Маска"], 1),
+        ("Сколько хостов в сети /28?", ["14","16","30","32"], 0),
+        ("Какой адрес является частным?", ["8.8.8.8","192.168.1.1","1.1.1.1","200.100.50.1"], 1),
+    ]),
+    ("Протоколы маршрутизации", [
+        ("OSPF — это протокол...", ["Дистанционно-векторный","Состояния канала","Статической маршрутизации","Шифрования"], 1),
+        ("RIP использует метрику...", ["Пропускная способность","Задержка","Число хопов","Надёжность"], 2),
+        ("BGP применяется для...", ["Локальных сетей","Междоменной маршрутизации","Шифрования","DHCP"], 1),
+        ("Административная дистанция OSPF?", ["90","110","120","170"], 1),
+        ("Что такое AS?", ["Автономная система","Антивирусная защита","Адресное пространство","Активный сервер"], 0),
+    ]),
+    ("Безопасность сетей", [
+        ("Что такое firewall?", ["Маршрутизатор","Межсетевой экран","Коммутатор","DNS-сервер"], 1),
+        ("VPN обеспечивает...", ["Скорость","Шифрованный туннель","DNS-разрешение","Балансировку"], 1),
+        ("WPA3 используется для...", ["Маршрутизации","Защиты Wi-Fi","Шифрования email","DNS"], 1),
+        ("Что делает IDS?", ["Блокирует атаки","Обнаруживает вторжения","Маршрутизирует","Шифрует"], 1),
+        ("SSL/TLS работает на уровне...", ["Сетевом","Транспортном","Представления","Прикладном"], 2),
+    ]),
+    ("Итоговый тест по курсу", [
+        ("Какой протокол используется для email?", ["FTP","SMTP","HTTP","DNS"], 1),
+        ("DNS преобразует...", ["IP в MAC","Домен в IP","MAC в IP","IP в домен"], 1),
+        ("Какой порт у HTTPS?", ["80","443","21","25"], 1),
+        ("NAT выполняет...", ["Шифрование","Трансляцию адресов","Маршрутизацию","Фильтрацию"], 1),
+        ("DHCP назначает...", ["IP-адрес автоматически","Маршрут","DNS-имя","Маску вручную"], 0),
+    ]),
+]
 
-PASSWORD = "Student123!"
+# Score progression per test round (students improve over time)
+# Each row: [student_0_correct, student_1_correct, ..., student_9_correct] out of 5
+SCORE_MATRIX = [
+    # Test 1 (day 1-2): low start
+    [2, 1, 3, 2, 1, 2, 1, 3, 2, 1],
+    # Test 2 (day 3-4): slight improvement
+    [3, 2, 3, 3, 2, 3, 2, 3, 3, 2],
+    # Test 3 (day 5-6): mid-range
+    [4, 3, 4, 3, 3, 3, 3, 4, 3, 3],
+    # Test 4 (day 7-8): good
+    [4, 4, 5, 4, 3, 4, 4, 4, 4, 3],
+    # Test 5 (day 9-10): strong finish
+    [5, 5, 5, 4, 4, 5, 4, 5, 5, 4],
+]
 
 
 def run():
@@ -42,15 +92,9 @@ def run():
     con.row_factory = sqlite3.Row
     cur = con.cursor()
 
-    # 1. Ensure group exists
-    existing = cur.execute("SELECT id FROM groups WHERE name=?", (GROUP_NAME,)).fetchone()
-    if not existing:
+    # 1. Ensure group & teaching assignment
+    if not cur.execute("SELECT id FROM groups WHERE name=?", (GROUP_NAME,)).fetchone():
         cur.execute("INSERT INTO groups (name, teacher_id) VALUES (?, ?)", (GROUP_NAME, TEACHER_ID))
-        print(f"Created group {GROUP_NAME}")
-    else:
-        print(f"Group {GROUP_NAME} already exists (id={existing['id']})")
-
-    # 2. Ensure teaching assignment
     ta = cur.execute(
         "SELECT * FROM teaching_assignments WHERE teacher_id=? AND discipline_id=? AND group_name=?",
         (TEACHER_ID, DISCIPLINE_ID, GROUP_NAME),
@@ -60,26 +104,13 @@ def run():
             "INSERT INTO teaching_assignments (teacher_id, discipline_id, group_name) VALUES (?, ?, ?)",
             (TEACHER_ID, DISCIPLINE_ID, GROUP_NAME),
         )
-        print(f"Assigned teacher {TEACHER_ID} → discipline {DISCIPLINE_ID} → group {GROUP_NAME}")
 
-    # 3. Get questions for the test
-    questions = cur.execute(
-        "SELECT id, correct_index FROM questions WHERE test_id=? ORDER BY id", (TEST_ID,)
-    ).fetchall()
-    if not questions:
-        print(f"ERROR: No questions found for test {TEST_ID}")
-        return
-    q_count = len(questions)
-    print(f"Test {TEST_ID} has {q_count} questions")
-
-    # 4. Create students and attempts
-    now = datetime.now()
-    for i, (full_name, email) in enumerate(STUDENTS):
-        # Check if student already exists
+    # 2. Create/get students
+    student_ids = []
+    for full_name, email in STUDENTS:
         ex = cur.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
         if ex:
-            student_id = ex["id"]
-            print(f"  Student {email} already exists (id={student_id})")
+            student_ids.append(ex["id"])
         else:
             salt = new_salt()
             pw_hash = hash_password(PASSWORD, salt)
@@ -88,48 +119,83 @@ def run():
                 "VALUES (?, ?, ?, 'student', ?, ?)",
                 (email, pw_hash, salt, full_name, GROUP_NAME),
             )
-            student_id = cur.lastrowid
-            print(f"  Created student {full_name} (id={student_id})")
+            student_ids.append(cur.lastrowid)
+            print(f"  Created student {full_name}")
 
-        # Delete old attempts for this student+test
-        old_attempts = cur.execute(
-            "SELECT id FROM attempts WHERE student_id=? AND test_id=?", (student_id, TEST_ID)
-        ).fetchall()
-        for oa in old_attempts:
+    # 3. Delete ALL old attempts for these students (clean slate)
+    for sid in student_ids:
+        old = cur.execute("SELECT id FROM attempts WHERE student_id=?", (sid,)).fetchall()
+        for oa in old:
             cur.execute("DELETE FROM answers WHERE attempt_id=?", (oa["id"],))
             cur.execute("DELETE FROM attempts WHERE id=?", (oa["id"],))
 
-        # Create attempt with target score
-        target = TARGET_CORRECT[i]
-        score = round(target / q_count * 100, 1)
-        taken_at = (now - timedelta(hours=random.randint(1, 48), minutes=random.randint(0, 59))).isoformat()
+    # 4. Create tests, questions, and attempts
+    now = datetime.now()
+    base_date = now - timedelta(days=12)
 
+    for t_idx, (theme_title, questions_data) in enumerate(TEST_THEMES):
+        # Reuse existing lecture (pick first available)
+        lectures = cur.execute(
+            "SELECT id FROM lectures WHERE teacher_id=? AND discipline_id=? ORDER BY id",
+            (TEACHER_ID, DISCIPLINE_ID),
+        ).fetchall()
+        lecture_id = lectures[min(t_idx, len(lectures) - 1)]["id"]
+
+        # Create test
+        test_day = base_date + timedelta(days=t_idx * 2)
         cur.execute(
-            "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
-            (TEST_ID, student_id, score, taken_at),
+            "INSERT INTO tests (lecture_id, title, status, created_at) VALUES (?, ?, 'published', ?)",
+            (lecture_id, f"Тест: {theme_title}", test_day.isoformat()),
         )
-        attempt_id = cur.lastrowid
+        test_id = cur.lastrowid
+        print(f"\nTest {t_idx+1}: '{theme_title}' (id={test_id})")
 
-        # Create individual answers
-        correct_ids = random.sample(range(q_count), min(target, q_count))
-        for j, q in enumerate(questions):
-            is_correct = 1 if j in correct_ids else 0
-            if is_correct:
-                selected = q["correct_index"]
-            else:
-                wrong_options = [x for x in range(4) if x != q["correct_index"]]
-                selected = random.choice(wrong_options)
-
+        # Create questions
+        q_ids = []
+        for q_text, options, correct_idx in questions_data:
             cur.execute(
-                "INSERT INTO answers (attempt_id, question_id, selected_index, is_correct) VALUES (?, ?, ?, ?)",
-                (attempt_id, q["id"], selected, is_correct),
+                "INSERT INTO questions (test_id, text, options_json, correct_index) VALUES (?, ?, ?, ?)",
+                (test_id, q_text, json.dumps(options, ensure_ascii=False), correct_idx),
+            )
+            q_ids.append((cur.lastrowid, correct_idx))
+
+        # Each student takes this test
+        scores_row = SCORE_MATRIX[t_idx]
+        for s_idx, sid in enumerate(student_ids):
+            target_correct = scores_row[s_idx]
+            score = round(target_correct / 5 * 100, 1)
+
+            # Randomize attempt time within the 2-day window
+            attempt_time = test_day + timedelta(
+                hours=random.randint(2, 40),
+                minutes=random.randint(0, 59),
             )
 
-        print(f"    → Attempt: {score}% ({target}/{q_count} correct)")
+            cur.execute(
+                "INSERT INTO attempts (test_id, student_id, score, taken_at) VALUES (?, ?, ?, ?)",
+                (test_id, sid, score, attempt_time.isoformat()),
+            )
+            attempt_id = cur.lastrowid
+
+            # Create answers
+            correct_positions = random.sample(range(5), min(target_correct, 5))
+            for j, (qid, correct_idx) in enumerate(q_ids):
+                is_correct = 1 if j in correct_positions else 0
+                if is_correct:
+                    selected = correct_idx
+                else:
+                    wrong = [x for x in range(4) if x != correct_idx]
+                    selected = random.choice(wrong)
+                cur.execute(
+                    "INSERT INTO answers (attempt_id, question_id, selected_index, is_correct) VALUES (?, ?, ?, ?)",
+                    (attempt_id, qid, selected, is_correct),
+                )
+
+            print(f"  {STUDENTS[s_idx][0]}: {score}% ({target_correct}/5)")
 
     con.commit()
     con.close()
-    print("\nDone! 10 students seeded with test attempts.")
+    print("\n✅ Done! 5 tests × 10 students = 50 attempts seeded across 10 days.")
 
 
 if __name__ == "__main__":
