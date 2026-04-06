@@ -56,8 +56,8 @@ h1,h2,h3,h4{font-family:"Space Grotesk","Manrope",sans-serif;letter-spacing:-.03
 .doc-card p{margin:0;color:#5c7394;font-size:13px;line-height:1.45}
 .doc-card strong{display:inline-block;margin-bottom:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6c82a2}
 .qr-card{justify-items:center;align-content:start;height:100%}
-.qr-card img{width:320px;height:320px;cursor:zoom-in}
-@media (max-width:1100px){.doc-hub-grid,.manual-slide .body,.load-slide .load-bottom{grid-template-columns:1fr!important}.doc-sections{grid-template-columns:1fr}.qr-card img{width:240px;height:240px}}
+.qr-card img{width:100%;max-width:420px;height:auto;aspect-ratio:1;cursor:zoom-in}
+@media (max-width:1100px){.doc-hub-grid,.manual-slide .body,.load-slide .load-bottom{grid-template-columns:1fr!important}.doc-sections{grid-template-columns:1fr}.qr-card img{max-width:280px}}
 
 /* Cards fill available space */
 .card,.quote{display:flex;flex-direction:column}
